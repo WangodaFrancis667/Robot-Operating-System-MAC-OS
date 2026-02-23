@@ -1,18 +1,75 @@
+# =============================================================================
+# ROS 2 Jazzy — Docker Compose Configuration for macOS
+# =============================================================================
+# Usage:
+#   ./run.sh start    — build (if needed) and launch the container
+#   ./run.sh shell    — open an interactive shell inside the running container
+#   ./run.sh stop     — stop and remove the container
+#   ./run.sh build    — force-rebuild the image
+#
+# GUI (RViz2, rqt, Gazebo) is forwarded to XQuartz on the host.
+# Ensure XQuartz is running and "Allow connections from network clients"
+# is enabled in XQuartz → Preferences → Security.
+# =============================================================================
+
 services:
   ros_dev:
-    build: .
-    container_name: ros_jazzy_mac
-    network_mode: host
+    build:
+      context: .
+      dockerfile: Dockerfile
+      # Uncomment the line below to force a specific platform on Apple Silicon
+      # args:
+      #   - BUILDPLATFORM=linux/amd64
+    image: ros2-jazzy-macos:latest
+    container_name: ros_jazzy_dev
+
+    # -------------------------------------------------------------------------
+    # Environment variables
+    # -------------------------------------------------------------------------
     environment:
-      # Forward the display to your Mac's XQuartz server
+      # X11 display forwarding — XQuartz listens on display :0 of the host
       - DISPLAY=host.docker.internal:0
-      # Required for some GUI apps to render correctly
+      # Disable shared memory for Qt (required in some Docker environments)
       - QT_X11_NO_MITSHM=1
+      # Disable GPU acceleration to prevent crashes without a real GPU
+      - LIBGL_ALWAYS_SOFTWARE=1
+      # ROS domain isolation (change if using multiple ROS networks)
+      - ROS_DOMAIN_ID=0
+      # Coloured terminal output for ROS 2 logs
+      - RCUTILS_COLORIZED_OUTPUT=1
+
+    # -------------------------------------------------------------------------
+    # Volume mounts
+    # -------------------------------------------------------------------------
     volumes:
-      # Mount your local src folder so code persists
+      # Persist your ROS 2 package source code on the host
       - ./src:/ros2_ws/src
-      # Mount X11 socket
+      # Share the X11 Unix socket for GUI access (macOS via XQuartz)
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
-    stdin_open: true
-    tty: true
+      # Cache colcon build artefacts between container restarts (optional)
+      - ros2_build_cache:/ros2_ws/build
+      - ros2_install_cache:/ros2_ws/install
+      - ros2_log_cache:/ros2_ws/log
+
+    # -------------------------------------------------------------------------
+    # Container options
+    # -------------------------------------------------------------------------
+    stdin_open: true   # Keep STDIN open (docker run -i)
+    tty: true          # Allocate a pseudo-TTY (docker run -t)
+
+    # Required for hardware access and certain ROS 2 features (e.g. serial ports)
     privileged: true
+
+    # Shared memory size — increase for large sensor data / ROS 2 DDS
+    shm_size: "512mb"
+
+    # Restart policy — won't start automatically; only restarts on crash
+    restart: "no"
+
+# =============================================================================
+# Named volumes for persistent colcon build artefacts
+# =============================================================================
+volumes:
+  ros2_build_cache:
+  ros2_install_cache:
+  ros2_log_cache:
