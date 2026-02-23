@@ -20,7 +20,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     x11-xserver-utils \
     xauth \
     mesa-utils \
-    libgl1-mesa-glx \
+    libgl1 \
     libgl1-mesa-dri \
     # ROS 2 build tools
     python3-pip \
@@ -56,11 +56,22 @@ ARG USERNAME=ros
 ARG USER_UID=1000
 ARG USER_GID=1000
 
-RUN groupadd --gid ${USER_GID} ${USERNAME} \
-    && useradd  --uid ${USER_UID} --gid ${USER_GID} -m ${USERNAME} \
-    && apt-get update && apt-get install -y sudo \
-    && echo "${USERNAME} ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers \
-    && rm -rf /var/lib/apt/lists/*
+# Ubuntu 24.04 (Noble) already ships with GID/UID 1000 (user "ubuntu").
+# Rename or create the group/user so our "ros" user always owns UID:GID 1000.
+RUN apt-get update && apt-get install -y sudo && rm -rf /var/lib/apt/lists/* \
+    && existing_group="$(getent group  ${USER_GID} | cut -d: -f1 || true)" \
+    && if   [ -z "$existing_group" ]; then \
+         groupadd --gid ${USER_GID} ${USERNAME}; \
+       elif [ "$existing_group" != "${USERNAME}" ]; then \
+         groupmod -n ${USERNAME} "$existing_group"; \
+       fi \
+    && existing_user="$(getent passwd ${USER_UID} | cut -d: -f1 || true)" \
+    && if   [ -z "$existing_user" ]; then \
+         useradd --uid ${USER_UID} --gid ${USER_GID} -m -s /bin/bash ${USERNAME}; \
+       elif [ "$existing_user" != "${USERNAME}" ]; then \
+         usermod -l ${USERNAME} -d /home/${USERNAME} -m "$existing_user"; \
+       fi \
+    && echo "${USERNAME} ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
 # ---------------------------------------------------------------------------
 # Workspace setup
