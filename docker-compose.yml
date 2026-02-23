@@ -1,0 +1,18 @@
+services:
+  ros_dev:
+    build: .
+    container_name: ros_jazzy_mac
+    network_mode: host
+    environment:
+      # Forward the display to your Mac's XQuartz server
+      - DISPLAY=host.docker.internal:0
+      # Required for some GUI apps to render correctly
+      - QT_X11_NO_MITSHM=1
+    volumes:
+      # Mount your local src folder so code persists
+      - ./src:/ros2_ws/src
+      # Mount X11 socket
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+    stdin_open: true
+    tty: true
+    privileged: true
