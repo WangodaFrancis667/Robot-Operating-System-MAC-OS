@@ -34,16 +34,15 @@ services:
       # ---------------------------------------------------------------------------
       # VirtualGL + Mesa llvmpipe software rendering
       # ---------------------------------------------------------------------------
-      # XQuartz only provides OpenGL 2.1 via indirect GLX; RViz2 needs 3.3+.
-      # VirtualGL renders offscreen using Mesa llvmpipe (OpenGL 4.5 in software)
-      # then ships the result to XQuartz as a plain X11 pixmap.
-      # Always launch OpenGL apps with: vglrun rviz2 / vglrun rqt
-      # Aliases rv, rq, gz are pre-configured in ~/.bashrc inside the container.
-      # Xvfb virtual display started by entrypoint.sh — VirtualGL renders here
+      # VirtualGL renders OpenGL offscreen into Xvfb (Mesa llvmpipe → OpenGL 4.5)
+      # then composites each frame to XQuartz as a plain X11 image.
+      # XQuartz never sees an OpenGL call — only 2-D pixels.
+      # Xvfb virtual display started by entrypoint.sh
       - VGL_DISPLAY=:99
-      # X11 transport: VirtualGL composites rendered frames straight to XQuartz
-      # (avoids needing a vglclient daemon on the Mac host)
+      # X11 transport: composite rendered frames straight to XQuartz
+      # (no vglclient daemon required on the Mac host)
       - VGL_TRANSPORT=x11
+      # Tell Mesa to use the llvmpipe software renderer inside Xvfb
       - GALLIUM_DRIVER=llvmpipe
       - LIBGL_ALWAYS_SOFTWARE=1
       # ROS domain isolation (change if using multiple ROS networks)
