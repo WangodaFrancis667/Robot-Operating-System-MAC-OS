@@ -15,6 +15,8 @@ export LIBGL_ALWAYS_SOFTWARE=1
 export MESA_GL_VERSION_OVERRIDE=3.3   # Tells OGRE the SW renderer supports GL 3.3+
 export MESA_GLSL_VERSION_OVERRIDE=330
 export QT_X11_NO_MITSHM=1
+# Force VirtualGL to use plain X11 transport — vglclient is not running on macOS
+export VGL_TRANSPORT=x11
 
 # ---------------------------------------------------------------------------
 # 1. Start a virtual X framebuffer on display :99.
