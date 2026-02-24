@@ -2,16 +2,18 @@
 # ROS 2 Jazzy — macOS Docker Development Image
 # =============================================================================
 # Base: Official OSRF ROS 2 Jazzy Desktop (Ubuntu Noble)
-# Includes: Full ROS 2 desktop, RViz2, GUI via X11 + VirtualGL on macOS
-# Target : macOS (Intel & Apple Silicon) with XQuartz for GUI forwarding
+# Includes: Full ROS 2 desktop, RViz2, GUI via VirtualGL + XQuartz on macOS
+# Target : macOS (Apple Silicon & Intel) with XQuartz for GUI forwarding
 #
 # GUI Strategy:
 #   XQuartz (macOS) only provides OpenGL 2.1 via indirect GLX.
-#   RViz2 / OGRE requires OpenGL 3.3+.
-#   VirtualGL intercepts all GLX/OpenGL calls, renders offscreen using
-#   Mesa llvmpipe (software, OpenGL 4.5), then ships the 2-D result to
-#   XQuartz as a plain X11 image.  No GPU or special kernel module needed.
-#   Launch GUI apps with:  vglrun rviz2   or use the 'rv', 'rq' aliases.
+#   RViz2 / OGRE requires OpenGL 3.3+.  VirtualGL intercepts all OpenGL
+#   calls, renders offscreen into Xvfb using Mesa llvmpipe (OpenGL 4.5 in
+#   pure software), then ships the finished 2-D frame to XQuartz as a plain
+#   X11 image.  XQuartz never sees a single OpenGL call.
+#   VirtualGL 3.1+ ships native arm64 packages — the architecture is
+#   detected at build time so the image works on both Apple Silicon and Intel.
+#   Launch GUI apps with: vglrun rviz2  (or the aliases rv / rq / gz).
 # =============================================================================
 
 FROM osrf/ros:jazzy-desktop
@@ -27,7 +29,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     x11-apps \
     x11-xserver-utils \
     xauth \
-    # Virtual framebuffer — provides a local X server for VirtualGL's 3D rendering
+    # Virtual framebuffer — VirtualGL renders OpenGL here (Mesa llvmpipe)
     xvfb \
     # Mesa OpenGL — llvmpipe software renderer (OpenGL 4.5, used by VirtualGL)
     mesa-utils \
@@ -58,14 +60,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # ---------------------------------------------------------------------------
-# VirtualGL 2.6.5 — offscreen OpenGL rendering, composited to XQuartz via X11
-# 2.6.x is the last stable series whose .deb ships all transport plugins.
-# Proxy transport (VGL_TRANSPORT=proxy) = X11 transport; no vglclient needed.
-# Ubuntu 24.04 does not package virtualgl, so we pull the upstream .deb.
+# VirtualGL — architecture-aware install (arm64 on Apple Silicon, amd64 on Intel)
+# VirtualGL 3.1+ ships official arm64 .deb packages from GitHub releases.
+# We auto-detect the container architecture so the same Dockerfile works on both.
 # ---------------------------------------------------------------------------
-ARG VIRTUALGL_VERSION=2.6.5
-RUN wget -q "https://github.com/VirtualGL/virtualgl/releases/download/${VIRTUALGL_VERSION}/virtualgl_${VIRTUALGL_VERSION}_amd64.deb" \
-    -O /tmp/virtualgl.deb \
+ARG VIRTUALGL_VERSION=3.1.1
+RUN ARCH=$(dpkg --print-architecture) \
+    && wget -q "https://github.com/VirtualGL/virtualgl/releases/download/${VIRTUALGL_VERSION}/virtualgl_${VIRTUALGL_VERSION}_${ARCH}.deb" \
+       -O /tmp/virtualgl.deb \
     && apt-get install -y /tmp/virtualgl.deb \
     && rm /tmp/virtualgl.deb \
     && rm -rf /var/lib/apt/lists/*
@@ -118,11 +120,12 @@ RUN echo "source /opt/ros/jazzy/setup.bash" >> /home/${USERNAME}/.bashrc \
     && echo "export ROS_DOMAIN_ID=0" >> /home/${USERNAME}/.bashrc \
     && echo "export RCUTILS_COLORIZED_OUTPUT=1" >> /home/${USERNAME}/.bashrc \
     && echo "export QT_X11_NO_MITSHM=1" >> /home/${USERNAME}/.bashrc \
-    && echo "# VirtualGL / Mesa software rendering" >> /home/${USERNAME}/.bashrc \
-    && echo "# Xvfb runs on :99 (started by /entrypoint.sh) — VirtualGL renders there" >> /home/${USERNAME}/.bashrc \
+    && echo "# VirtualGL — offscreen OpenGL via Mesa llvmpipe, composited to XQuartz" >> /home/${USERNAME}/.bashrc \
+    && echo "# Xvfb virtual display :99 is started by /entrypoint.sh" >> /home/${USERNAME}/.bashrc \
     && echo "export VGL_DISPLAY=:99" >> /home/${USERNAME}/.bashrc \
     && echo "# X11 transport: composite frames directly to XQuartz (no vglclient needed)" >> /home/${USERNAME}/.bashrc \
     && echo "export VGL_TRANSPORT=x11" >> /home/${USERNAME}/.bashrc \
+    && echo "# Tell Mesa to use the llvmpipe software renderer inside Xvfb" >> /home/${USERNAME}/.bashrc \
     && echo "export GALLIUM_DRIVER=llvmpipe" >> /home/${USERNAME}/.bashrc \
     && echo "export LIBGL_ALWAYS_SOFTWARE=1" >> /home/${USERNAME}/.bashrc \
     && echo "" >> /home/${USERNAME}/.bashrc \
@@ -134,7 +137,7 @@ RUN echo "source /opt/ros/jazzy/setup.bash" >> /home/${USERNAME}/.bashrc \
     && echo "alias rr='ros2 run'" >> /home/${USERNAME}/.bashrc \
     && echo "alias rt='ros2 topic'" >> /home/${USERNAME}/.bashrc \
     && echo "alias rn='ros2 node'" >> /home/${USERNAME}/.bashrc \
-    && echo "# GUI shortcuts (always use vglrun for OpenGL apps)" >> /home/${USERNAME}/.bashrc \
+    && echo "# GUI shortcuts — always run OpenGL apps through vglrun" >> /home/${USERNAME}/.bashrc \
     && echo "alias rv='vglrun rviz2'" >> /home/${USERNAME}/.bashrc \
     && echo "alias rq='vglrun rqt'" >> /home/${USERNAME}/.bashrc \
     && echo "alias gz='vglrun gazebo'" >> /home/${USERNAME}/.bashrc
