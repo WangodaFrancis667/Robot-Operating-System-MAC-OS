@@ -17,6 +17,9 @@ set -e
 Xvfb :99 -screen 0 1920x1080x24 +extension GLX -ac -nolisten tcp &
 XVFB_PID=$!
 export VGL_DISPLAY=:99
+# X11 transport: VirtualGL composites rendered frames to XQuartz directly
+# (no vglclient daemon required on the macOS host)
+export VGL_TRANSPORT=x11
 # Give Xvfb a moment to initialise before any GPU work begins
 for _i in $(seq 1 20); do
     xdpyinfo -display :99 &>/dev/null && break
