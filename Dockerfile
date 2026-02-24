@@ -136,8 +136,9 @@ RUN echo "" >> /home/${USERNAME}/.bashrc \
     && echo "export QT_X11_NO_MITSHM=1" >> /home/${USERNAME}/.bashrc \
     && echo "# Xvfb virtual display started by entrypoint.sh" >> /home/${USERNAME}/.bashrc \
     && echo "export VGL_DISPLAY=:99" >> /home/${USERNAME}/.bashrc \
-    && echo "# Use proxy transport — VirtualGL 3.x renamed 'x11' plugin to 'proxy'" >> /home/${USERNAME}/.bashrc \
-    && echo "export VGL_TRANSPORT=proxy" >> /home/${USERNAME}/.bashrc \
+    && echo "# VGL_COMPRESS=proxy forces X11 transport — host.docker.internal:0 looks" >> /home/${USERNAME}/.bashrc \
+    && echo "# remote to VirtualGL, which would otherwise require a vglclient on the Mac" >> /home/${USERNAME}/.bashrc \
+    && echo "export VGL_COMPRESS=proxy" >> /home/${USERNAME}/.bashrc \
     && echo "# Mesa software renderer — required for OpenGL inside Docker on macOS" >> /home/${USERNAME}/.bashrc \
     && echo "export GALLIUM_DRIVER=llvmpipe" >> /home/${USERNAME}/.bashrc \
     && echo "export LIBGL_ALWAYS_SOFTWARE=1" >> /home/${USERNAME}/.bashrc \
