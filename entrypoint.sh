@@ -18,9 +18,8 @@ set -e
 Xvfb :99 -screen 0 1920x1080x24 +extension GLX -ac -nolisten tcp &
 XVFB_PID=$!
 export VGL_DISPLAY=:99
-# X11 transport: VirtualGL ships rendered frames to XQuartz directly
-# (no vglclient daemon required on the macOS host)
-export VGL_TRANSPORT=x11
+# VGL_TRANSPORT is intentionally NOT set: VirtualGL 3.x removed the plugin
+# transport system. X11 forwarding to $DISPLAY is now the built-in default.
 # Give Xvfb a moment to initialise before any OpenGL work begins
 for _i in $(seq 1 20); do
     xdpyinfo -display :99 &>/dev/null && break
