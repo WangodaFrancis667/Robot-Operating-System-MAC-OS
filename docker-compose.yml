@@ -36,11 +36,11 @@ services:
       # entrypoint.sh.  OpenGL is rendered there (offscreen, software),
       # then composited to XQuartz via plain X11 — no GLX to XQuartz.
       - VGL_DISPLAY=:99
-      # Force VirtualGL to use its built-in proxy (X11) transport.
-      # In VirtualGL 3.x the old "x11" plugin was renamed to "proxy".
-      # This sends finished frames to XQuartz over the existing X11 connection
-      # without requiring a vglclient daemon on the Mac.
-      - VGL_TRANSPORT=proxy
+      # VirtualGL defaults to JPEG/VGL-Transport when DISPLAY looks like a
+      # network address (host.docker.internal:0), which requires a vglclient
+      # daemon on the Mac.  VGL_COMPRESS=proxy forces the plain X11 transport
+      # (equivalent to vglrun -c proxy) — no vglclient needed.
+      - VGL_COMPRESS=proxy
 
       # Force Mesa's llvmpipe software renderer (OpenGL 4.5 capable)
       - GALLIUM_DRIVER=llvmpipe
