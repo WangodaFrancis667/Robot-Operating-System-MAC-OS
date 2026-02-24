@@ -10,6 +10,21 @@
 set -e
 
 # ---------------------------------------------------------------------------
+# 0. Start a virtual X framebuffer for VirtualGL's offscreen 3-D rendering
+#    VirtualGL renders OpenGL here (Mesa llvmpipe → OpenGL 4.5), then
+#    composites the result to XQuartz via the DISPLAY variable.
+# ---------------------------------------------------------------------------
+Xvfb :99 -screen 0 1920x1080x24 +extension GLX -ac -nolisten tcp &
+XVFB_PID=$!
+export VGL_DISPLAY=:99
+# Give Xvfb a moment to initialise before any GPU work begins
+for _i in $(seq 1 20); do
+    xdpyinfo -display :99 &>/dev/null && break
+    sleep 0.1
+done
+unset _i
+
+# ---------------------------------------------------------------------------
 # 1. Source the base ROS 2 installation
 # ---------------------------------------------------------------------------
 source /opt/ros/jazzy/setup.bash
@@ -32,13 +47,18 @@ echo "║  ROS Distro : $(printenv ROS_DISTRO)"
 echo "║  Workspace  : /ros2_ws"
 echo "║  ROS Domain : $(printenv ROS_DOMAIN_ID)"
 echo "╠══════════════════════════════════════════════════════════╣"
-echo "║  Handy aliases:"
-echo "║    cb  — colcon build --symlink-install"
-echo "║    cs  — source install/setup.bash"
-echo "║    rl  — ros2 launch"
-echo "║    rr  — ros2 run"
-echo "║    rt  — ros2 topic"
-echo "║    rn  — ros2 node"
+echo "║  GUI apps (always use vglrun for OpenGL apps):          ║"
+echo "║    rv        — vglrun rviz2                             ║"
+echo "║    rq        — vglrun rqt                               ║"
+echo "║    gz        — vglrun gazebo                            ║"
+echo "╠══════════════════════════════════════════════════════════╣"
+echo "║  ROS 2 aliases:                                         ║"
+echo "║    cb  — colcon build --symlink-install                 ║"
+echo "║    cs  — source install/setup.bash                      ║"
+echo "║    rl  — ros2 launch                                    ║"
+echo "║    rr  — ros2 run                                       ║"
+echo "║    rt  — ros2 topic                                     ║"
+echo "║    rn  — ros2 node                                      ║"
 echo "╚══════════════════════════════════════════════════════════╝"
 echo ""
 
