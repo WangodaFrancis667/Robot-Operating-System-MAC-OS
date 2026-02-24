@@ -58,10 +58,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # ---------------------------------------------------------------------------
-# VirtualGL — offscreen OpenGL rendering, composited to XQuartz via X11
-# Releases: https://github.com/VirtualGL/virtualgl/releases
+# VirtualGL 2.6.5 — offscreen OpenGL rendering, composited to XQuartz via X11
+# 2.6.x is the last stable series whose .deb ships all transport plugins.
+# Proxy transport (VGL_TRANSPORT=proxy) = X11 transport; no vglclient needed.
+# Ubuntu 24.04 does not package virtualgl, so we pull the upstream .deb.
 # ---------------------------------------------------------------------------
-ARG VIRTUALGL_VERSION=3.1.1
+ARG VIRTUALGL_VERSION=2.6.5
 RUN wget -q "https://github.com/VirtualGL/virtualgl/releases/download/${VIRTUALGL_VERSION}/virtualgl_${VIRTUALGL_VERSION}_amd64.deb" \
     -O /tmp/virtualgl.deb \
     && apt-get install -y /tmp/virtualgl.deb \
@@ -119,6 +121,8 @@ RUN echo "source /opt/ros/jazzy/setup.bash" >> /home/${USERNAME}/.bashrc \
     && echo "# VirtualGL / Mesa software rendering" >> /home/${USERNAME}/.bashrc \
     && echo "# Xvfb runs on :99 (started by /entrypoint.sh) — VirtualGL renders there" >> /home/${USERNAME}/.bashrc \
     && echo "export VGL_DISPLAY=:99" >> /home/${USERNAME}/.bashrc \
+    && echo "# X11 transport: composite frames directly to XQuartz (no vglclient needed)" >> /home/${USERNAME}/.bashrc \
+    && echo "export VGL_TRANSPORT=x11" >> /home/${USERNAME}/.bashrc \
     && echo "export GALLIUM_DRIVER=llvmpipe" >> /home/${USERNAME}/.bashrc \
     && echo "export LIBGL_ALWAYS_SOFTWARE=1" >> /home/${USERNAME}/.bashrc \
     && echo "" >> /home/${USERNAME}/.bashrc \
