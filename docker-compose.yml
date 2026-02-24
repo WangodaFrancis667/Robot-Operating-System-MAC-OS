@@ -36,6 +36,9 @@ services:
       # entrypoint.sh.  OpenGL is rendered there (offscreen, software),
       # then composited to XQuartz via plain X11 — no GLX to XQuartz.
       - VGL_DISPLAY=:99
+      # Force VirtualGL to use plain X11 transport (not the vglclient binary
+      # protocol). This is required on macOS — vglclient is not running there.
+      - VGL_TRANSPORT=x11
 
       # Force Mesa's llvmpipe software renderer (OpenGL 4.5 capable)
       - GALLIUM_DRIVER=llvmpipe
