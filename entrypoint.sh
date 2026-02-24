@@ -12,15 +12,16 @@ set -e
 # ---------------------------------------------------------------------------
 # 0. Start a virtual X framebuffer for VirtualGL's offscreen 3-D rendering
 #    VirtualGL renders OpenGL here (Mesa llvmpipe → OpenGL 4.5), then
-#    composites the result to XQuartz via the DISPLAY variable.
+#    composites each finished frame to XQuartz via plain X11 pixels.
+#    XQuartz never sees a GLX/OpenGL call — this is why it works on macOS.
 # ---------------------------------------------------------------------------
 Xvfb :99 -screen 0 1920x1080x24 +extension GLX -ac -nolisten tcp &
 XVFB_PID=$!
 export VGL_DISPLAY=:99
-# X11 transport: VirtualGL composites rendered frames to XQuartz directly
+# X11 transport: VirtualGL ships rendered frames to XQuartz directly
 # (no vglclient daemon required on the macOS host)
 export VGL_TRANSPORT=x11
-# Give Xvfb a moment to initialise before any GPU work begins
+# Give Xvfb a moment to initialise before any OpenGL work begins
 for _i in $(seq 1 20); do
     xdpyinfo -display :99 &>/dev/null && break
     sleep 0.1
@@ -50,7 +51,7 @@ echo "║  ROS Distro : $(printenv ROS_DISTRO)"
 echo "║  Workspace  : /ros2_ws"
 echo "║  ROS Domain : $(printenv ROS_DOMAIN_ID)"
 echo "╠══════════════════════════════════════════════════════════╣"
-echo "║  GUI apps (always use vglrun for OpenGL apps):          ║"
+echo "║  GUI apps — always launch via vglrun (or use aliases):  ║"
 echo "║    rv        — vglrun rviz2                             ║"
 echo "║    rq        — vglrun rqt                               ║"
 echo "║    gz        — vglrun gazebo                            ║"
