@@ -68,7 +68,6 @@ check_docker() {
 check_xquartz() {
     info "Checking XQuartz..."
 
-    # Check XQuartz is installed
     if ! command -v xquartz &>/dev/null && [ ! -d "/Applications/Utilities/XQuartz.app" ]; then
         warn "XQuartz does not appear to be installed."
         warn "  Install it from: https://www.xquartz.org/"
@@ -76,19 +75,24 @@ check_xquartz() {
         return
     fi
 
-    # Attempt to allow connections from localhost
+    # Open XQuartz if it isn't already running
+    if ! pgrep -x Xquartz &>/dev/null && ! pgrep -x quartz-wm &>/dev/null; then
+        info "Starting XQuartz..."
+        open -a XQuartz
+        # Give it a moment to create the X11 socket
+        sleep 2
+    fi
+
     if command -v xhost &>/dev/null; then
-        # Permit connections from the loopback address and Docker's internal host
-        xhost +localhost          &>/dev/null || true
-        xhost +127.0.0.1         &>/dev/null || true
-        xhost +host.docker.internal &>/dev/null || true
+        xhost +localhost               &>/dev/null || true
+        xhost +127.0.0.1              &>/dev/null || true
+        xhost +host.docker.internal   &>/dev/null || true
         success "XQuartz: display access granted to localhost."
     else
         warn "xhost not found — XQuartz may not be fully started."
         warn "  Log out and back in, or reboot, after installing XQuartz."
     fi
 
-    # Make sure DISPLAY points somewhere useful
     if [ -z "${DISPLAY:-}" ]; then
         export DISPLAY=:0
         info "DISPLAY was unset; defaulted to ':0'."
@@ -133,7 +137,6 @@ cmd_start() {
     check_xquartz
     ensure_src_dir
 
-    # Build only if image doesn't already exist
     if ! docker image inspect ros2-jazzy-macos:latest &>/dev/null; then
         info "Image not found — building for the first time..."
         docker compose -f "${COMPOSE_FILE}" build
@@ -144,7 +147,7 @@ cmd_start() {
 
     success "Container is up."
     echo ""
-    info "Opening interactive shell (type 'exit' to detach without stopping)..."
+    info "Opening interactive shell (type 'exit' to leave without stopping the container)..."
     echo ""
 
     cmd_shell
@@ -154,7 +157,8 @@ cmd_shell() {
     if ! docker ps --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
         die "Container '${CONTAINER_NAME}' is not running.\n  Run './run.sh start' first."
     fi
-    docker compose -f "${COMPOSE_FILE}" exec "${SERVICE_NAME}" bash
+    # Use 'bash -i' so .bashrc is sourced and all aliases are available
+    docker compose -f "${COMPOSE_FILE}" exec "${SERVICE_NAME}" bash -i
 }
 
 cmd_stop() {
@@ -181,13 +185,20 @@ cmd_logs() {
 cmd_gui() {
     check_xquartz
     echo ""
-    info "To test GUI forwarding, run the following inside the container:"
-    echo -e "    ${CYAN}xeyes${RESET}    — simple X11 test (moving eyes widget)"
-    echo -e "    ${CYAN}glxgears${RESET} — OpenGL test"
-    echo -e "    ${CYAN}rviz2${RESET}    — ROS 2 visualiser"
+    info "Run these inside the container to test GUI forwarding:"
     echo ""
-    warn "If GUI apps fail: open XQuartz → Preferences → Security"
-    warn "  and enable 'Allow connections from network clients', then restart XQuartz."
+    echo -e "  ${CYAN}xeyes${RESET}          — Basic X11 test (no OpenGL needed)"
+    echo -e "  ${CYAN}vglrun glxgears${RESET} — OpenGL test via VirtualGL + llvmpipe"
+    echo -e "  ${CYAN}rv${RESET}             — RViz2 (alias for: vglrun rviz2)"
+    echo -e "  ${CYAN}rq${RESET}             — rqt   (alias for: vglrun rqt)"
+    echo ""
+    warn "If xeyes works but vglrun glxgears fails:"
+    warn "  Check Xvfb is running inside the container: ps aux | grep Xvfb"
+    echo ""
+    warn "If nothing works — XQuartz setup checklist:"
+    warn "  1. XQuartz → Preferences → Security → enable 'Allow connections from network clients'"
+    warn "  2. Fully quit XQuartz (menu bar icon → Quit) and reopen it"
+    warn "  3. Run: xhost +localhost  (on the host, outside the container)"
     echo ""
 }
 
