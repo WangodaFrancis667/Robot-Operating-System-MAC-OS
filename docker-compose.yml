@@ -31,7 +31,17 @@ services:
       - DISPLAY=host.docker.internal:0
       # Disable shared memory for Qt (required in some Docker environments)
       - QT_X11_NO_MITSHM=1
-      # Disable GPU acceleration to prevent crashes without a real GPU
+      # ---------------------------------------------------------------------------
+      # VirtualGL + Mesa llvmpipe software rendering
+      # ---------------------------------------------------------------------------
+      # XQuartz only provides OpenGL 2.1 via indirect GLX; RViz2 needs 3.3+.
+      # VirtualGL renders offscreen using Mesa llvmpipe (OpenGL 4.5 in software)
+      # then ships the result to XQuartz as a plain X11 pixmap.
+      # Always launch OpenGL apps with: vglrun rviz2 / vglrun rqt
+      # Aliases rv, rq, gz are pre-configured in ~/.bashrc inside the container.
+      # Xvfb virtual display started by entrypoint.sh — VirtualGL renders here
+      - VGL_DISPLAY=:99
+      - GALLIUM_DRIVER=llvmpipe
       - LIBGL_ALWAYS_SOFTWARE=1
       # ROS domain isolation (change if using multiple ROS networks)
       - ROS_DOMAIN_ID=0
