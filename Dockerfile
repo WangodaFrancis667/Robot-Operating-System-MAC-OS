@@ -123,8 +123,8 @@ RUN echo "source /opt/ros/jazzy/setup.bash" >> /home/${USERNAME}/.bashrc \
     && echo "# VirtualGL — offscreen OpenGL via Mesa llvmpipe, composited to XQuartz" >> /home/${USERNAME}/.bashrc \
     && echo "# Xvfb virtual display :99 is started by /entrypoint.sh" >> /home/${USERNAME}/.bashrc \
     && echo "export VGL_DISPLAY=:99" >> /home/${USERNAME}/.bashrc \
-    && echo "# X11 transport: composite frames directly to XQuartz (no vglclient needed)" >> /home/${USERNAME}/.bashrc \
-    && echo "export VGL_TRANSPORT=x11" >> /home/${USERNAME}/.bashrc \
+    && echo "# VGL_TRANSPORT is NOT set: VirtualGL 3.x removed the plugin transport;" >> /home/${USERNAME}/.bashrc \
+    && echo "# X11 forwarding to \$DISPLAY is now the built-in default." >> /home/${USERNAME}/.bashrc \
     && echo "# Tell Mesa to use the llvmpipe software renderer inside Xvfb" >> /home/${USERNAME}/.bashrc \
     && echo "export GALLIUM_DRIVER=llvmpipe" >> /home/${USERNAME}/.bashrc \
     && echo "export LIBGL_ALWAYS_SOFTWARE=1" >> /home/${USERNAME}/.bashrc \
