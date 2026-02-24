@@ -41,6 +41,9 @@ services:
       # Aliases rv, rq, gz are pre-configured in ~/.bashrc inside the container.
       # Xvfb virtual display started by entrypoint.sh — VirtualGL renders here
       - VGL_DISPLAY=:99
+      # X11 transport: VirtualGL composites rendered frames straight to XQuartz
+      # (avoids needing a vglclient daemon on the Mac host)
+      - VGL_TRANSPORT=x11
       - GALLIUM_DRIVER=llvmpipe
       - LIBGL_ALWAYS_SOFTWARE=1
       # ROS domain isolation (change if using multiple ROS networks)
