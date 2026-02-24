@@ -15,9 +15,10 @@ export LIBGL_ALWAYS_SOFTWARE=1
 export MESA_GL_VERSION_OVERRIDE=3.3   # Tells OGRE the SW renderer supports GL 3.3+
 export MESA_GLSL_VERSION_OVERRIDE=330
 export QT_X11_NO_MITSHM=1
-# VirtualGL 3.x proxy transport — sends frames to XQuartz over X11,
-# no vglclient daemon needed on the Mac. ("x11" plugin was renamed "proxy")
-export VGL_TRANSPORT=proxy
+# VirtualGL defaults to JPEG/VGL-Transport when DISPLAY is a network address
+# (host.docker.internal:0), which requires a vglclient on the Mac.
+# VGL_COMPRESS=proxy forces plain X11 transport — no vglclient needed.
+export VGL_COMPRESS=proxy
 
 # ---------------------------------------------------------------------------
 # 1. Start a virtual X framebuffer on display :99.
