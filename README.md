@@ -38,9 +38,16 @@ solves both problems by wiring together:
 |-----------|------|
 | **Docker Desktop** | Runs the ROS 2 container in a Linux VM |
 | **XQuartz** | Provides an X11 server on macOS that the container can talk to |
+| **VirtualGL** | Renders OpenGL offscreen via Mesa llvmpipe, ships pixels to XQuartz |
 | **docker-compose** | Declares the container, volumes, and environment variables |
 | **run.sh** | One-stop helper script for every lifecycle operation |
 | **entrypoint.sh** | Bootstraps the ROS 2 environment inside the container |
+
+> **Why VirtualGL?** XQuartz only provides OpenGL 2.1 via indirect GLX.
+> RViz2 and OGRE require OpenGL 3.3+. VirtualGL intercepts all OpenGL calls,
+> renders offscreen using Mesa's `llvmpipe` software renderer (which supports
+> OpenGL 4.5), then composites the final frame to XQuartz as a plain X11 image.
+> This completely bypasses the XQuartz GLX limitation.
 
 The result is a reproducible, fully-isolated ROS 2 workspace that any hobbyist
 or professional robotics developer can clone and have running in minutes — with
@@ -160,24 +167,28 @@ additional shells at any time:
 
 ### Running GUI apps
 
-Once inside the container, launch any X11 application:
+Once inside the container, launch GUI applications **always prefixed with `vglrun`**:
 
 ```bash
 # Sanity check — a small animated window should appear on your Mac
 xeyes
 
-# ROS 2 visualiser
-rviz2
+# ROS 2 visualiser (use the alias or vglrun directly)
+rv           # alias for: vglrun rviz2
+vglrun rviz2
 
 # ROS 2 GUI tools suite
-rqt
+rq           # alias for: vglrun rqt
+vglrun rqt
 
 # OpenGL test
-glxgears
+vglrun glxgears
 ```
 
-If nothing appears, see [GUI Forwarding Setup](#gui-forwarding-setup-xquartz)
-and [Troubleshooting](#troubleshooting).
+> **Important:** Always use `vglrun` (or the `rv`/`rq`/`gz` aliases) for any
+> OpenGL application. Running `rviz2` directly will fail because XQuartz cannot
+> provide OpenGL 3.3+ natively. VirtualGL renders offscreen with Mesa llvmpipe
+> and sends the result to XQuartz as a standard X11 image.
 
 ---
 
@@ -264,8 +275,9 @@ XQuartz must be configured **once** to accept connections from the Docker VM.
 The following aliases are pre-configured in `~/.bashrc` inside the container:
 
 | Alias | Expands to |
-|-------|-----------|
-| `cb` | `colcon build --symlink-install` |
+|-------|-----------|| `rv` | `vglrun rviz2` |
+| `rq` | `vglrun rqt` |
+| `gz` | `vglrun gazebo` || `cb` | `colcon build --symlink-install` |
 | `ct` | `colcon test` |
 | `cs` | `source install/setup.bash` |
 | `rl` | `ros2 launch` |
@@ -277,15 +289,28 @@ The following aliases are pre-configured in `~/.bashrc` inside the container:
 
 ## Troubleshooting
 
-### GUI app opens but shows a blank / black window
+### `rviz2` crashes immediately with "Unable to create an OpenGL context"
 
-Software rendering is enabled by default (`LIBGL_ALWAYS_SOFTWARE=1`).
-If you see a black window in RViz2 or Gazebo, try:
+Do **not** run `rviz2` directly. XQuartz only provides OpenGL 2.1; RViz2
+needs 3.3. Always use VirtualGL:
 
 ```bash
-# Inside the container
-export LIBGL_ALWAYS_INDIRECT=1
+# Correct
+vglrun rviz2   # or just: rv
+
+# Wrong — will always fail on macOS+Docker
 rviz2
+```
+
+### `vglrun` not found
+
+The image needs to be rebuilt to include VirtualGL:
+
+```bash
+# On the host
+./run.sh stop
+./run.sh build
+./run.sh start
 ```
 
 ### `cannot connect to X server host.docker.internal:0`
