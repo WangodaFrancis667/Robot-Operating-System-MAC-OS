@@ -1,23 +1,30 @@
 <div align="center">
 
-# ROS 2 Jazzy · macOS Docker Dev Environment
+# ROS 2 Jazzy · Cross-Platform Docker Dev Environment
 
-**Run a full ROS 2 Jazzy desktop environment — including RViz2, rqt and Gazebo — on macOS (Intel & Apple Silicon) using Docker and X11 forwarding via XQuartz.**
+**Run a full ROS 2 Jazzy desktop — including RViz2, rqt and Gazebo Harmonic — on macOS, Linux, and Windows using Docker and a built-in browser-based VNC desktop. Zero host display configuration required.**
 
 <br/>
 
 [![ROS 2 Jazzy](https://img.shields.io/badge/ROS_2-Jazzy_Jalisco-22314E?style=for-the-badge&logo=ros&logoColor=white)](https://docs.ros.org/en/jazzy/)
 [![Docker](https://img.shields.io/badge/Docker-Desktop_4.x-2496ED?style=for-the-badge&logo=docker&logoColor=white)](https://www.docker.com/products/docker-desktop/)
 [![Ubuntu](https://img.shields.io/badge/Ubuntu-Noble_24.04-E95420?style=for-the-badge&logo=ubuntu&logoColor=white)](https://releases.ubuntu.com/noble/)
-[![macOS](https://img.shields.io/badge/macOS-12%2B_Intel_%26_Apple_Silicon-000000?style=for-the-badge&logo=apple&logoColor=white)](https://www.apple.com/macos/)
+[![Gazebo](https://img.shields.io/badge/Gazebo-Harmonic-FF6600?style=for-the-badge)](https://gazebosim.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-brightgreen?style=for-the-badge)](LICENSE)
+
+<br/>
+
+[![macOS](https://img.shields.io/badge/macOS-12%2B_Intel_%26_Apple_Silicon-000000?style=flat-square&logo=apple&logoColor=white)](https://www.apple.com/macos/)
+[![Linux](https://img.shields.io/badge/Linux-amd64-FCC624?style=flat-square&logo=linux&logoColor=black)](https://kernel.org/)
+[![Windows](https://img.shields.io/badge/Windows-10%2F11_WSL2-0078D4?style=flat-square&logo=windows&logoColor=white)](https://docs.microsoft.com/en-us/windows/wsl/)
 
 <br/>
 
 [🚀 Quick Start](#-quick-start) &nbsp;·&nbsp;
 [🏗️ Architecture](#%EF%B8%8F-architecture) &nbsp;·&nbsp;
 [📋 Prerequisites](#-prerequisites) &nbsp;·&nbsp;
-[🖥️ GUI Setup](#%EF%B8%8F-gui-forwarding-setup-xquartz) &nbsp;·&nbsp;
+[🖥️ GUI Desktop](#%EF%B8%8F-gui-desktop) &nbsp;·&nbsp;
+[⌨️ Aliases](#%EF%B8%8F-aliases-inside-the-container) &nbsp;·&nbsp;
 [🔧 Troubleshooting](#-troubleshooting) &nbsp;·&nbsp;
 [❓ FAQ](#-faq)
 
@@ -27,112 +34,255 @@
 
 ## 📖 Overview
 
-macOS does not ship with a native X Window System, and Docker Desktop for Mac does not expose the host GPU or display the same way Linux does. This project solves both problems with a carefully wired stack:
+This project provides a fully self-contained ROS 2 Jazzy development environment that works identically on **macOS**, **Linux**, and **Windows** — no host display server, no XQuartz, no VcXsrv, no per-platform configuration needed.
+
+The entire GUI stack runs **inside** the Docker container. You access the desktop through your browser or any VNC client.
 
 | Component | Role |
 |:---|:---|
-| [![Docker](https://img.shields.io/badge/-Docker_Desktop-2496ED?logo=docker&logoColor=white&style=flat-square)](https://www.docker.com/products/docker-desktop/) | Runs the ROS 2 container in a Linux VM |
-| [![XQuartz](https://img.shields.io/badge/-XQuartz_2.8.x-333333?logo=apple&logoColor=white&style=flat-square)](https://www.xquartz.org/) | Provides an X11 server on macOS for display forwarding |
-| **Xvfb** | Virtual framebuffer inside the container — OpenGL is rendered here |
-| [![VirtualGL](https://img.shields.io/badge/-VirtualGL_3.1.1-FFA500?style=flat-square)](https://virtualgl.org/) | Intercepts OpenGL calls, renders offscreen via Mesa llvmpipe, ships pixels to XQuartz |
-| [![Mesa](https://img.shields.io/badge/-Mesa_llvmpipe-6A0572?style=flat-square)](https://www.mesa3d.org/) | Pure software OpenGL 4.5 renderer — no GPU required |
-| **docker-compose** | Declares the container, volumes, and environment variables |
-| **`run.sh`** | One-stop helper script for every lifecycle operation |
-| **`entrypoint.sh`** | Bootstraps the ROS 2 environment and starts Xvfb on container launch |
+| **Xvfb `:99`** | Virtual framebuffer — OpenGL is rendered entirely here |
+| **Mesa llvmpipe** | Pure software OpenGL 4.5 renderer — no GPU required |
+| **x11vnc** | Streams the Xvfb framebuffer over VNC (port `5900`) |
+| **noVNC + websockify** | Serves the desktop in any browser (port `6080`) |
+| **`docker-compose.yml`** | Declares the container, volumes, and environment |
+| **`run.sh`** | One-stop lifecycle helper for every OS |
+| **`entrypoint.sh`** | Boots Xvfb, x11vnc, noVNC, then drops to the ROS shell |
 
-### 💡 Why this stack?
-
-[XQuartz](https://www.xquartz.org/) only provides **OpenGL 2.1** via indirect GLX, but [RViz2](https://docs.ros.org/en/jazzy/p/rviz2/) and OGRE require **OpenGL 3.3+**. The solution is a three-layer rendering pipeline running entirely inside the container:
+### 💡 How it works
 
 ```
-┌─────────────────────────────────────────────────────┐
-│  Mesa llvmpipe  ←  OpenGL 4.5 (software rendered)  │
-│          ↓  renders offscreen frames into            │
-│  Xvfb :99  ←  virtual framebuffer (never shown)    │
-│          ↓  VirtualGL reads pixels, sends as X11     │
-│  XQuartz :0  ←  your Mac screen (2D pixels only)   │
-└─────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│  Container (Ubuntu Noble 24.04)                                 │
+│                                                                 │
+│  RViz2 / rqt / Gazebo                                          │
+│       ↓  OpenGL 3.3 (Mesa llvmpipe — software, no GPU)         │
+│  Xvfb :99  ←  virtual framebuffer (1280×720)                   │
+│       ↓  pixels streamed via                                    │
+│  x11vnc  →  port 5900  (raw VNC)                               │
+│       ↓  proxied via                                           │
+│  websockify / noVNC  →  port 6080  (WebSocket + browser UI)    │
+└─────────────────────────────────────────────────────────────────┘
+       ↓                              ↓
+ VNC client (any OS)         Browser: http://localhost:6080/vnc.html
+ vnc://localhost:5900
 ```
 
-> XQuartz never receives a single OpenGL call — only 2D pixel data. This is why it works despite XQuartz's OpenGL 2.1 limitation.
-
-**Key environment variables:**
+**Key environment variables set automatically:**
 
 | Variable | Value | Purpose |
 |:---|:---:|:---|
 | `LIBGL_ALWAYS_SOFTWARE` | `1` | Forces Mesa software renderer |
-| `GALLIUM_DRIVER` | `llvmpipe` | Selects Mesa's llvmpipe backend |
-| `MESA_GL_VERSION_OVERRIDE` | `3.3` | Tells OGRE/RViz2 the renderer meets the GL 3.3 requirement |
-| `MESA_GLSL_VERSION_OVERRIDE` | `330` | Matching GLSL version override |
-| `VGL_DISPLAY` | `:99` | Points VirtualGL at the Xvfb display |
-| `VGL_COMPRESS` | `proxy` | Forces plain X11 transport — bypasses need for `vglclient` on the Mac |
+| `GALLIUM_DRIVER` | `llvmpipe` | Selects Mesa's high-performance llvmpipe backend |
+| `LP_NUM_THREADS` | `4` | Multi-threaded Mesa rendering |
+| `MESA_GL_VERSION_OVERRIDE` | `3.3` | Advertises GL 3.3 to OGRE/RViz2 |
+| `MESA_GLSL_VERSION_OVERRIDE` | `330` | Matching GLSL version |
+| `OGRE_RTT_MODE` | `Copy` | Avoids GLX pbuffer issues in OGRE |
+| `QT_QPA_PLATFORM` | `xcb` | Qt uses the Xvfb X11 display |
 
 ---
 
 ## 🏗️ Architecture
 
 ```
-macOS Host
-├── 🖥️  XQuartz  (X11 server — display :0)
+Your Machine (macOS / Linux / Windows)
 └── 🐳  Docker Desktop
     └── Container: ros_jazzy_dev
-        ├── Xvfb :99          ← virtual framebuffer (OpenGL rendered here)
-        ├── VirtualGL          ← intercepts GL, composites to XQuartz via X11
-        ├── /ros2_ws/src  ←── bind-mount → ./src  (your packages live here)
-        ├── /ros2_ws/build     (named volume — fast rebuilds)
-        ├── /ros2_ws/install   (named volume)
-        └── /ros2_ws/log       (named volume)
+        ├── Xvfb :99            ← virtual display (Mesa renders here)
+        ├── x11vnc :5900        ← VNC server
+        ├── noVNC/websockify :6080  ← browser VNC client
+        ├── /ros2_ws/src   ←── bind-mount → ./src  (your packages)
+        ├── /ros2_ws/build      (named volume — fast rebuilds)
+        ├── /ros2_ws/install    (named volume)
+        └── /ros2_ws/log        (named volume)
 
-./src  ← persisted on your Mac — survives container removal
+Ports exposed to host:
+  5900  →  VNC  (any VNC client, no password)
+  6080  →  noVNC  (http://localhost:6080/vnc.html)
+
+./src  ← persisted on your machine — survives container removal
 ```
 
 ---
 
 ## 📋 Prerequisites
 
-| Requirement | Minimum Version | Download |
-|:---|:---:|:---|
-| **macOS** | 12 Monterey | Intel & Apple Silicon (M1/M2/M3/M4) ✓ |
-| **Docker Desktop** | 4.x | [![Download](https://img.shields.io/badge/Download-Docker_Desktop-2496ED?style=flat-square&logo=docker&logoColor=white)](https://www.docker.com/products/docker-desktop/) |
-| **XQuartz** | 2.8.x | [![Download](https://img.shields.io/badge/Download-XQuartz-333333?style=flat-square&logo=apple&logoColor=white)](https://www.xquartz.org/) |
-| **Git** | Any | [![Download](https://img.shields.io/badge/Download-Git-F05032?style=flat-square&logo=git&logoColor=white)](https://git-scm.com/downloads) |
-| **Free Disk Space** | ~6 GB | For the ROS 2 Jazzy image |
-| **RAM** | 4 GB+ | 8 GB recommended for Gazebo |
+### All Platforms
 
-> [!NOTE]
-> **Apple Silicon (M1/M2/M3/M4):** The OSRF ROS 2 Jazzy image is `linux/amd64`. Docker Desktop emulates it transparently via [Rosetta 2](https://support.apple.com/en-us/HT211861). Performance is good for development; expect some slowdown in compute-heavy simulations.
-> Enable it in: *Docker Desktop → Settings → General → Use Rosetta for x86/amd64 emulation*.
+| Requirement | Minimum Version | Notes |
+|:---|:---:|:---|
+| **Docker Desktop** | 4.x | See platform-specific install below |
+| **Git** | Any | For cloning this repo |
+| **Free Disk Space** | ~8 GB | ROS 2 Jazzy + Gazebo Harmonic image |
+| **RAM** | 4 GB+ | 8 GB+ recommended for Gazebo simulation |
+| **CPU** | 2 cores+ | 4+ cores recommended |
+
+---
+
+### 🍎 macOS
+
+<details open>
+<summary><strong>Installation instructions</strong></summary>
+
+**1. Install Docker Desktop for Mac**
+
+[![Download Docker Desktop](https://img.shields.io/badge/⬇️_Download_Docker_Desktop-2496ED?style=for-the-badge&logo=docker&logoColor=white)](https://www.docker.com/products/docker-desktop/)
+
+- Supports Intel and Apple Silicon (M1/M2/M3/M4)
+- After install, open Docker Desktop and wait for the engine to start
+
+**2. Apple Silicon (M1/M2/M3/M4) — Enable Rosetta**
+
+The ROS 2 Jazzy image is `linux/amd64`. Docker Desktop emulates it transparently:
+
+*Docker Desktop → Settings → General → ✅ Use Rosetta for x86/amd64 emulation on Apple Silicon*
+
+> Performance is excellent for development. Compute-heavy simulations may be slower than on native amd64 hardware.
+
+**3. Allocate Sufficient Resources**
+
+*Docker Desktop → Settings → Resources*
+- Memory: **8 GB** (4 GB minimum; Gazebo needs more)
+- CPUs: **4+** recommended
+
+**4. No XQuartz needed**
+
+This project uses in-container VNC — no XQuartz, no X11 forwarding, no host display configuration required.
+
+</details>
+
+---
+
+### 🐧 Linux
+
+<details open>
+<summary><strong>Installation instructions</strong></summary>
+
+**1. Install Docker Engine**
+
+```bash
+# Remove old versions
+sudo apt-get remove docker docker-engine docker.io containerd runc
+
+# Install via the official convenience script
+curl -fsSL https://get.docker.com | sudo sh
+
+# Add your user to the docker group (avoids using sudo)
+sudo usermod -aG docker $USER
+newgrp docker
+```
+
+Or follow the [official Docker Engine install guide](https://docs.docker.com/engine/install/).
+
+**2. Install Docker Compose plugin**
+
+```bash
+sudo apt-get install -y docker-compose-plugin
+```
+
+Verify: `docker compose version`
+
+**3. No display server setup needed**
+
+The container runs its own Xvfb display. Your host display is not used at all — this works on headless servers too.
+
+</details>
+
+---
+
+### 🪟 Windows
+
+<details open>
+<summary><strong>Installation instructions</strong></summary>
+
+**1. Enable WSL 2**
+
+Open **PowerShell as Administrator** and run:
+
+```powershell
+# Install WSL 2 and Ubuntu
+wsl --install
+
+# Verify WSL version
+wsl --set-default-version 2
+```
+
+Restart your computer when prompted.
+
+**2. Install Docker Desktop for Windows**
+
+[![Download Docker Desktop](https://img.shields.io/badge/⬇️_Download_Docker_Desktop-2496ED?style=for-the-badge&logo=docker&logoColor=white)](https://www.docker.com/products/docker-desktop/)
+
+During installation, ensure **Use WSL 2 based engine** is selected.
+
+After installation, open Docker Desktop and confirm the engine starts.
+
+**3. Configure WSL 2 Integration**
+
+*Docker Desktop → Settings → Resources → WSL Integration → ✅ Enable integration with your WSL distro*
+
+**4. Allocate Resources**
+
+Create or edit `%USERPROFILE%\.wslconfig`:
+
+```ini
+[wsl2]
+memory=8GB
+processors=4
+```
+
+Restart WSL: `wsl --shutdown`, then reopen your terminal.
+
+**5. Run commands from WSL 2 terminal**
+
+Open **Ubuntu** (or your WSL distro) from the Start Menu. All commands in this README should be run from the WSL terminal, not PowerShell or CMD.
+
+> No VcXsrv, no X410, no Xming needed. VNC runs inside the container.
+
+</details>
 
 ---
 
 ## 🚀 Quick Start
 
+> **All three platforms follow the same steps once Docker is installed.**
+
 ```bash
 # 1. Clone the repository
-git clone https://github.com/your-username/ros2-macos-docker.git
-cd ros2-macos-docker
+git clone https://github.com/your-username/ros2-jazzy-docker.git
+cd ros2-jazzy-docker
 
-# 2. Make scripts executable
+# 2. Make the helper script executable
 chmod +x run.sh
 
-# 3. Configure XQuartz (first-time only — see GUI Setup section below)
-#    Log out and back in after installing XQuartz.
-
-# 4. Build the image and open a shell  (first build: ~5–10 min)
+# 3. Build and launch  (first build: ~5–10 min — downloads ~4 GB)
 ./run.sh start
 ```
 
-Once inside the container, verify the setup:
+Once the container is running, your shell is inside the ROS 2 environment:
 
 ```bash
-# ✅ Basic X11 check — a small animated window should appear on your Mac
+# ✅ Verify X11 is working (a window appears in the VNC desktop)
 xeyes
 
-# ✅ OpenGL check via VirtualGL + llvmpipe
-vglrun glxgears
+# ✅ Verify OpenGL software rendering
+glxgears
+
+# ✅ Check OpenGL version info
+glxinfo | grep "OpenGL version"
 
 # ✅ Launch RViz2
 rv
+
+# ✅ Launch rqt
+rq
+
+# ✅ Launch Gazebo Sim
+gz
+```
+
+**Open the GUI desktop in your browser:**
+```
+http://localhost:6080/vnc.html
 ```
 
 ---
@@ -141,21 +291,62 @@ rv
 
 ```
 .
-├── 🐳  Dockerfile           # Builds the ROS 2 Jazzy dev image
-├── 📦  docker-compose.yml   # Container, volumes & environment configuration
-├── 🚪  entrypoint.sh        # Starts Xvfb, sources ROS 2, prints welcome banner
-├── ⚙️  run.sh               # Lifecycle helper (start / stop / build / shell / logs …)
-├── 📂  src/                 # Your ROS 2 packages — bind-mounted into the container
-│   └── (add packages here)
+├── 🐳  Dockerfile           # ROS 2 Jazzy image with GUI stack
+├── 📦  docker-compose.yml   # Container, ports, volumes & environment
+├── 🚪  entrypoint.sh        # Boots Xvfb → x11vnc → noVNC, then ROS shell
+├── ⚙️  run.sh               # Lifecycle helper (start / stop / build / shell…)
+├── 📂  src/                 # Your ROS 2 packages (bind-mounted)
+│   └── (add your packages here)
 └── 📖  README.md
 ```
 
 > [!TIP]
-> **Your work lives in `./src`.** Everything in `./src` is bind-mounted to `/ros2_ws/src` inside the container and fully persisted on your Mac. Deleting or recreating the container will **not** lose your code.
+> **Your work lives in `./src`.**  It is bind-mounted to `/ros2_ws/src` inside the container and fully persisted on your host machine. Deleting or rebuilding the container will **never** affect your source code.
 
 ---
 
-## 🔨 Detailed Usage
+## 🖥️ GUI Desktop
+
+No host display setup is required on any platform. The GUI desktop is served from inside the container over VNC.
+
+### Accessing the desktop
+
+| Method | URL / Address | Notes |
+|:---|:---|:---|
+| **Browser (recommended)** | `http://localhost:6080/vnc.html` | Works on all OS, no install needed |
+| **VNC client** | `vnc://localhost:5900` | No password |
+| **macOS built-in** | Finder → Go → Connect to Server → `vnc://localhost:5900` | Native screen sharing |
+
+> [!NOTE]
+> The desktop starts as a **black screen** — this is normal. Xvfb provides a bare framebuffer with no window manager. GUI windows appear when you launch applications from the container shell.
+
+### Launching GUI applications
+
+From inside the container shell (opened via `./run.sh start` or `./run.sh shell`):
+
+```bash
+# X11 sanity check
+xeyes
+
+# OpenGL check — should show spinning gears
+glxgears
+
+# ROS 2 GUI tools
+rv          # RViz2   — 3D robot visualiser
+rq          # rqt     — ROS 2 plugin GUI framework
+gz          # Gazebo  — full robotics simulator
+```
+
+### Ports
+
+| Port | Service | Access |
+|:---:|:---|:---|
+| `6080` | noVNC browser client | `http://localhost:6080/vnc.html` |
+| `5900` | Raw VNC | `vnc://localhost:5900` |
+
+---
+
+## 🔨 Usage
 
 ### Starting the environment
 
@@ -163,37 +354,19 @@ rv
 ./run.sh start
 ```
 
-This will automatically:
-1. Verify Docker is running
-2. Start XQuartz and grant display access (`xhost +localhost`)
-3. Build the Docker image if it doesn't exist yet
-4. Launch the container (which starts Xvfb internally via `entrypoint.sh`)
-5. Drop you into an interactive shell with all aliases loaded
+This automatically:
+1. Verifies Docker is running
+2. Builds the image if it does not exist yet
+3. Starts the container (which boots Xvfb, x11vnc, noVNC via `entrypoint.sh`)
+4. Waits for services to start, then prints the access URLs
+5. Drops you into an interactive ROS 2 shell with all aliases loaded
 
 ### Opening additional shells
 
 ```bash
-# In a new terminal tab/window — attaches to the already-running container
+# In any new terminal — attaches to the already-running container
 ./run.sh shell
 ```
-
-### Running GUI applications
-
-```bash
-# X11 test (no OpenGL — good first check)
-xeyes
-
-# OpenGL test via VirtualGL + llvmpipe
-vglrun glxgears
-
-# ROS 2 GUI tools — use the aliases or vglrun directly
-rv              # RViz2   →  vglrun rviz2
-rq              # rqt     →  vglrun rqt
-gz              # Gazebo  →  vglrun gz sim
-```
-
-> [!WARNING]
-> **Always use `vglrun`** (or the `rv`/`rq`/`gz` aliases) for any OpenGL application. Running `rviz2` directly will **crash** because XQuartz cannot provide OpenGL 3.3+ natively.
 
 ### Building ROS 2 packages
 
@@ -216,67 +389,38 @@ cs              # alias → source install/setup.bash
 ./run.sh stop
 ```
 
+### Force-rebuilding the image
+
+```bash
+./run.sh build
+```
+
 ### All available commands
 
 | Command | Description |
 |:---|:---|
-| `./run.sh start` | Build image (if needed) & start container, then open shell |
+| `./run.sh start` | Build image (if needed), start container, open shell |
 | `./run.sh shell` | Attach an interactive shell to the running container |
 | `./run.sh build` | Force-rebuild the image from scratch (no cache) |
 | `./run.sh stop` | Stop & remove the container — `./src` data is preserved |
 | `./run.sh status` | Show current container state |
 | `./run.sh logs` | Tail container stdout/stderr (Ctrl-C to exit) |
-| `./run.sh gui` | Verify XQuartz / display forwarding setup |
+| `./run.sh gui` | Print GUI access info and diagnostic tips |
 | `./run.sh help` | Print usage summary |
-
----
-
-## 🖥️ GUI Forwarding Setup (XQuartz)
-
-[XQuartz](https://www.xquartz.org/) must be configured **once** to accept connections from Docker.
-
-### Step-by-step setup
-
-**Step 1 — Install XQuartz**
-
-[![Download XQuartz](https://img.shields.io/badge/⬇️_Download_XQuartz_2.8.x-333333?style=for-the-badge&logo=apple&logoColor=white)](https://www.xquartz.org/)
-
-**Step 2 — Log out and log back in (required)**
-
-XQuartz replaces the default X11 socket. This change only takes effect after re-login.
-
-**Step 3 — Enable Network Connections**
-
-Open **XQuartz → Preferences → Security** and check:
-- ✅ *Allow connections from network clients*
-
-**Step 4 — Fully restart XQuartz**
-
-Quit via the menu bar icon (→ *Quit X11*), then reopen XQuartz.
-
-**Step 5 — Launch the environment**
-
-```bash
-./run.sh start
-# run.sh automatically calls: xhost +localhost
-```
-
-> [!NOTE]
-> **Why is the Security setting needed?** Docker Desktop runs containers inside a Linux VM. The container connects to XQuartz via `host.docker.internal:0`, which XQuartz treats as a network connection. The Security setting permits it.
 
 ---
 
 ## ⌨️ Aliases Inside the Container
 
-All aliases are available immediately in any shell opened via `./run.sh start` or `./run.sh shell`. They are also installed as system-wide commands in `/usr/local/bin/`.
+All aliases are sourced automatically from `~/.bashrc` in every shell session.
 
 ### 🎮 GUI Shortcuts
 
 | Alias | Expands to | Description |
 |:---|:---|:---|
-| `rv` | `vglrun rviz2` | [RViz2](https://docs.ros.org/en/jazzy/p/rviz2/) — ROS 2 3D visualizer |
-| `rq` | `vglrun rqt` | [rqt](https://docs.ros.org/en/jazzy/Concepts/About-RQt.html) — ROS 2 GUI plugin framework |
-| `gz` | `vglrun gz sim` | [Gazebo](https://gazebosim.org/) — robotics simulator |
+| `rv` | `rviz2` (with Mesa env) | [RViz2](https://docs.ros.org/en/jazzy/p/rviz2/) — ROS 2 3D visualiser |
+| `rq` | `rqt` (with Mesa env) | [rqt](https://docs.ros.org/en/jazzy/Concepts/About-RQt.html) — ROS 2 GUI plugin framework |
+| `gz sim` | `gz sim` (with Mesa env) | [Gazebo Harmonic](https://gazebosim.org/) — robotics simulator |
 
 ### 🔧 Build & Workspace
 
@@ -300,84 +444,89 @@ All aliases are available immediately in any shell opened via `./run.sh start` o
 ## 🔧 Troubleshooting
 
 <details>
-<summary><strong>❌ `rviz2` crashes with "Unable to create an OpenGL context"</strong></summary>
+<summary><strong>❌ Black screen in noVNC browser</strong></summary>
 
-Never run `rviz2` directly. Always go through VirtualGL:
+This is expected on first connect. The Xvfb framebuffer is empty until you launch an application.
 
+From the container shell, run any GUI app:
 ```bash
-rv            # ✅ correct — uses vglrun alias
-vglrun rviz2  # ✅ also correct
-rviz2         # ❌ wrong — will crash on macOS + Docker
+xeyes    # lightweight test
+rv       # RViz2
 ```
 
-</details>
-
-<details>
-<summary><strong>❌ `cannot connect to X server host.docker.internal:0`</strong></summary>
-
-1. Make sure XQuartz is open and running.
-2. Confirm **Allow connections from network clients** is enabled in *XQuartz → Preferences → Security*, then **fully restart XQuartz**.
-3. On the host (outside the container):
-   ```bash
-   xhost +localhost
-   xhost +127.0.0.1
-   ```
-4. Run `./run.sh gui` — this calls `xhost +localhost` automatically.
-
-</details>
-
-<details>
-<summary><strong>❌ `Authorization required, but no authorization protocol specified`</strong></summary>
-
-Run on the host (outside the container):
-
-```bash
-xhost +localhost
-xhost +127.0.0.1
-```
-
-</details>
-
-<details>
-<summary><strong>⚠️ `QStandardPaths: XDG_RUNTIME_DIR not set`</strong></summary>
-
-This is a **harmless warning**. Qt falls back to `/tmp/runtime-<user>`. It does not affect functionality and can be safely ignored.
-
-</details>
-
-<details>
-<summary><strong>❌ `[VGL] ERROR: Could not connect to VGL client`</strong></summary>
-
-`VGL_COMPRESS` is not set to `proxy`. VirtualGL classifies `host.docker.internal:0` as a remote display and tries to use binary VGL Transport, which requires a `vglclient` daemon on the Mac.
-
-The fix is already in `docker-compose.yml`:
-```yaml
-- VGL_COMPRESS=proxy
-```
-
-If you are running a custom setup, export this in your shell before launching:
-```bash
-export VGL_COMPRESS=proxy
-```
-
-</details>
-
-<details>
-<summary><strong>❌ Xvfb failed to start — GUI apps show no display</strong></summary>
-
-Check inside the container:
-
+If it stays black even after launching an app, check that Xvfb and x11vnc are running:
 ```bash
 ps aux | grep Xvfb
-xdpyinfo -display :99
+ps aux | grep x11vnc
+cat /tmp/x11vnc.log
+cat /tmp/xvfb.log
 ```
 
-If Xvfb is not running, restart the container:
+</details>
+
+<details>
+<summary><strong>❌ "Failed to connect to server" in noVNC</strong></summary>
+
+noVNC starts before x11vnc finishes binding. Wait 5–10 seconds after `./run.sh start`, then refresh the browser page.
+
+If the issue persists:
+```bash
+./run.sh logs
+```
+
+Look for `x11vnc` startup errors. Common causes:
+- x11vnc crashed due to an unsupported flag — check `/tmp/x11vnc.log` in the container
+- Port 5900 or 6080 already in use on the host — change the port mapping in `docker-compose.yml`
+
+</details>
+
+<details>
+<summary><strong>❌ Container exits immediately after starting</strong></summary>
 
 ```bash
 ./run.sh stop
+docker logs ros_jazzy_dev
+```
+
+Common causes:
+- Xvfb socket permission issue → resolved by ensuring the entrypoint runs as root
+- A previous container left a stale X lock: the entrypoint cleans `/tmp/.X99-lock` automatically
+
+If the problem persists, rebuild:
+```bash
+./run.sh build
 ./run.sh start
 ```
+
+</details>
+
+<details>
+<summary><strong>❌ RViz2 / Gazebo crash or show OpenGL errors</strong></summary>
+
+Verify software rendering is active:
+```bash
+glxinfo | grep "OpenGL renderer"
+# Expected: Mesa llvmpipe (LLVM 17.0.6, 256 bits)
+```
+
+If it shows a GPU renderer instead, the Mesa env vars are not being picked up. Use the `rv`/`gz` aliases which explicitly set all required variables.
+
+</details>
+
+<details>
+<summary><strong>❌ Gazebo is very slow</strong></summary>
+
+Gazebo running on software rendering is CPU-bound. Recommended steps:
+
+1. **Reduce physics update rate** in your world file: `<max_step_size>0.01</max_step_size>` and `<real_time_update_rate>500</real_time_update_rate>`
+
+2. **Use a simpler world** — avoid worlds with many meshes or lights
+
+3. **Allocate more CPU** to Docker:
+   - macOS/Windows: *Docker Desktop → Settings → Resources → CPUs → increase*
+   - Linux: no limit by default
+
+4. **Disable shadows and reflections** in Gazebo's render settings
 
 </details>
 
@@ -385,21 +534,49 @@ If Xvfb is not running, restart the container:
 <summary><strong>❌ `colcon build` fails with missing dependencies</strong></summary>
 
 ```bash
+cd /ros2_ws
 rosdep install --from-paths src --ignore-src -r -y
+cb
 ```
-
-See the [colcon docs](https://colcon.readthedocs.io/en/released/) and [rosdep docs](https://docs.ros.org/en/independent/api/rosdep/html/) for more options.
 
 </details>
 
 <details>
-<summary><strong>❌ Apple Silicon: `exec format error`</strong></summary>
+<summary><strong>❌ Apple Silicon — `exec format error` or very slow performance</strong></summary>
 
-The image is `linux/amd64`. Enable Rosetta emulation in Docker Desktop:
+Enable Rosetta emulation in Docker Desktop:
 
-*Settings → General → Use Rosetta for x86/amd64 emulation on Apple Silicon*
+*Settings → General → ✅ Use Rosetta for x86/amd64 emulation on Apple Silicon*
 
-See [Apple's Rosetta documentation](https://support.apple.com/en-us/HT211861) for more context.
+Restart Docker Desktop after changing this setting.
+
+</details>
+
+<details>
+<summary><strong>❌ Windows — container can't reach the internet (DNS failure)</strong></summary>
+
+The `docker-compose.yml` already sets explicit DNS (`8.8.8.8`, `8.8.4.4`). If you still have issues:
+
+```bash
+# Test DNS inside the container
+docker exec ros_jazzy_dev ping -c 2 8.8.8.8
+```
+
+If that works but hostnames don't resolve, check your WSL 2 network settings or corporate firewall/VPN configuration.
+
+</details>
+
+<details>
+<summary><strong>❌ Port 5900 or 6080 already in use</strong></summary>
+
+Edit `docker-compose.yml` and remap the ports:
+```yaml
+ports:
+  - "5901:5900"   # host:container
+  - "6081:6080"
+```
+
+Then access noVNC at `http://localhost:6081/vnc.html`.
 
 </details>
 
@@ -410,7 +587,7 @@ See [Apple's Rosetta documentation](https://support.apple.com/en-us/HT211861) fo
 docker system prune -af --volumes
 ```
 
-> ⚠️ This removes all unused Docker images, containers, and volumes. Your `./src` code on the host is unaffected.
+> ⚠️ This removes all unused Docker images, containers, and volumes. Your `./src` code on the host is completely unaffected.
 
 </details>
 
@@ -419,20 +596,23 @@ docker system prune -af --volumes
 ## ❓ FAQ
 
 <details>
-<summary><strong>Can I use this with ROS 1 (Noetic)?</strong></summary>
+<summary><strong>Do I need XQuartz on macOS?</strong></summary>
 
-Yes. Change the base image in `Dockerfile`:
-```dockerfile
-FROM osrf/ros:noetic-desktop-full
-```
-Then update the `setup.bash` source paths in `entrypoint.sh` and `docker-compose.yml` accordingly. See the [ROS Noetic docs](https://wiki.ros.org/noetic) for details.
+**No.** XQuartz is not used at all. The GUI runs inside the container via Xvfb and is served to your browser via noVNC. This is a key design goal — zero host display configuration on every platform.
 
 </details>
 
 <details>
-<summary><strong>Why does `xeyes` work but `rviz2` (without `vglrun`) doesn't?</strong></summary>
+<summary><strong>Does this work on a headless Linux server (no monitor)?</strong></summary>
 
-`xeyes` is a plain X11 app — it uses no OpenGL. `rviz2` requires OpenGL 3.3+, which XQuartz cannot provide directly (it caps at 2.1 via indirect GLX). `vglrun` routes all OpenGL calls through Mesa llvmpipe inside the container, bypassing XQuartz's limitation entirely.
+**Yes.** Xvfb is a virtual framebuffer — it does not require a physical display. You can run this setup on a headless cloud VM or CI server and access the GUI via the noVNC browser client just like on a desktop machine.
+
+</details>
+
+<details>
+<summary><strong>Can I use a physical GPU for rendering?</strong></summary>
+
+This setup is intentionally GPU-free for maximum cross-platform compatibility. If you are on Linux and want to pass through a GPU, you would need to replace the Mesa llvmpipe stack with a real OpenGL driver and remove `LIBGL_ALWAYS_SOFTWARE=1`. This is not supported in the current configuration.
 
 </details>
 
@@ -456,7 +636,7 @@ See the [ROS 2 Domain ID docs](https://docs.ros.org/en/jazzy/Concepts/Intermedia
 <details>
 <summary><strong>I updated a package in `./src` — do I need to rebuild the image?</strong></summary>
 
-No. `./src` is a bind mount that reflects changes immediately. Just run `cb` inside the container to rebuild your ROS 2 workspace:
+**No.** `./src` is a bind mount — changes on the host are reflected inside the container immediately. Just rebuild your ROS 2 workspace:
 
 ```bash
 cb    # colcon build --symlink-install
@@ -466,9 +646,9 @@ cs    # source install/setup.bash
 </details>
 
 <details>
-<summary><strong>Can I open multiple terminals connected to the same container?</strong></summary>
+<summary><strong>Can I open multiple shells connected to the same container?</strong></summary>
 
-Yes — run `./run.sh shell` in as many terminal tabs or windows as you like. All sessions share the same container state.
+**Yes.** Run `./run.sh shell` in as many terminal tabs or windows as you like. All sessions share the same running container and filesystem state.
 
 </details>
 
@@ -477,13 +657,42 @@ Yes — run `./run.sh shell` in as many terminal tabs or windows as you like. Al
 
 ```bash
 ./run.sh stop
-docker image rm ros2-jazzy-macos:latest
+docker image rm ros2-jazzy-dev:latest
+docker volume rm ros_ros2_build_cache ros_ros2_install_cache ros_ros2_log_cache
 ./run.sh start   # rebuilds from scratch (~5–10 min)
 ```
 
 Your source code in `./src` is **untouched**.
 
 </details>
+
+<details>
+<summary><strong>Can I use this with ROS 1 (Noetic)?</strong></summary>
+
+Yes. Change the base image in `Dockerfile`:
+```dockerfile
+FROM osrf/ros:noetic-desktop-full
+```
+
+Then update the `setup.bash` paths in `entrypoint.sh` accordingly. See the [ROS Noetic install docs](https://wiki.ros.org/noetic/Installation/Ubuntu) for details.
+
+</details>
+
+---
+
+## 📚 Resources
+
+| Resource | Link |
+|:---|:---|
+| ROS 2 Jazzy Documentation | [![ROS 2 Docs](https://img.shields.io/badge/docs.ros.org-Jazzy-22314E?style=flat-square&logo=ros&logoColor=white)](https://docs.ros.org/en/jazzy/) |
+| ROS 2 Tutorials | [![Tutorials](https://img.shields.io/badge/ROS_2-Tutorials-22314E?style=flat-square&logo=ros&logoColor=white)](https://docs.ros.org/en/jazzy/Tutorials.html) |
+| Gazebo Harmonic | [![Gazebo](https://img.shields.io/badge/Gazebo-Harmonic-FF6600?style=flat-square)](https://gazebosim.org/docs/harmonic/) |
+| Docker Desktop | [![Docker](https://img.shields.io/badge/Docker-Desktop-2496ED?style=flat-square&logo=docker&logoColor=white)](https://docs.docker.com/desktop/) |
+| noVNC | [![noVNC](https://img.shields.io/badge/noVNC-Web_VNC_Client-4A90D9?style=flat-square)](https://novnc.com/) |
+| Mesa 3D (llvmpipe) | [![Mesa](https://img.shields.io/badge/Mesa-llvmpipe-6A0572?style=flat-square)](https://www.mesa3d.org/) |
+| colcon Build Tool | [![colcon](https://img.shields.io/badge/colcon-Build_Tool-blue?style=flat-square)](https://colcon.readthedocs.io/en/released/) |
+| rosdep | [![rosdep](https://img.shields.io/badge/rosdep-Dependency_Manager-22314E?style=flat-square&logo=ros&logoColor=white)](https://docs.ros.org/en/independent/api/rosdep/html/) |
+| OSRF Docker Images | [![OSRF](https://img.shields.io/badge/OSRF-Docker_Hub-2496ED?style=flat-square&logo=docker&logoColor=white)](https://hub.docker.com/r/osrf/ros/) |
 
 ---
 
@@ -500,23 +709,6 @@ Please include a brief description of *why* the change is useful, especially for
 
 ---
 
-## 📚 Further Reading & Resources
-
-| Resource | Link |
-|:---|:---|
-| ROS 2 Jazzy Documentation | [![ROS 2 Docs](https://img.shields.io/badge/docs.ros.org-Jazzy-22314E?style=flat-square&logo=ros&logoColor=white)](https://docs.ros.org/en/jazzy/) |
-| ROS 2 Tutorials | [![Tutorials](https://img.shields.io/badge/ROS_2-Tutorials-22314E?style=flat-square&logo=ros&logoColor=white)](https://docs.ros.org/en/jazzy/Tutorials.html) |
-| Docker Desktop for Mac | [![Docker](https://img.shields.io/badge/Docker-Desktop_Mac-2496ED?style=flat-square&logo=docker&logoColor=white)](https://docs.docker.com/desktop/install/mac-install/) |
-| XQuartz | [![XQuartz](https://img.shields.io/badge/XQuartz-xquartz.org-333333?style=flat-square&logo=apple&logoColor=white)](https://www.xquartz.org/) |
-| VirtualGL | [![VirtualGL](https://img.shields.io/badge/VirtualGL-virtualgl.org-FFA500?style=flat-square)](https://virtualgl.org/) |
-| Mesa 3D Graphics | [![Mesa](https://img.shields.io/badge/Mesa-mesa3d.org-6A0572?style=flat-square)](https://www.mesa3d.org/) |
-| colcon Build Tool | [![colcon](https://img.shields.io/badge/colcon-Build_Tool-blue?style=flat-square)](https://colcon.readthedocs.io/en/released/) |
-| rosdep | [![rosdep](https://img.shields.io/badge/rosdep-Dependency_Manager-22314E?style=flat-square&logo=ros&logoColor=white)](https://docs.ros.org/en/independent/api/rosdep/html/) |
-| Gazebo Robotics Simulator | [![Gazebo](https://img.shields.io/badge/Gazebo-Simulator-orange?style=flat-square)](https://gazebosim.org/home) |
-| OSRF ROS Docker Images | [![OSRF](https://img.shields.io/badge/OSRF-Docker_Hub-2496ED?style=flat-square&logo=docker&logoColor=white)](https://hub.docker.com/r/osrf/ros/) |
-
----
-
 ## 📄 License
 
 This project is released under the [MIT License](LICENSE).
@@ -525,9 +717,10 @@ This project is released under the [MIT License](LICENSE).
 
 <div align="center">
 
-Made with ❤️ for the robotics hobbyist community
+Made with ❤️ for the robotics community
 
 [![ROS 2](https://img.shields.io/badge/powered_by-ROS_2_Jazzy-22314E?style=flat-square&logo=ros&logoColor=white)](https://docs.ros.org/en/jazzy/)
-[![Docker](https://img.shields.io/badge/containerized_with-Docker-2496ED?style=flat-square&logo=docker&logoColor=white)](https://www.docker.com/)
+[![Docker](https://img.shields.io/badge/containerised_with-Docker-2496ED?style=flat-square&logo=docker&logoColor=white)](https://www.docker.com/)
+[![Works on](https://img.shields.io/badge/works_on-macOS_%7C_Linux_%7C_Windows-lightgrey?style=flat-square)](.)
 
 </div>
