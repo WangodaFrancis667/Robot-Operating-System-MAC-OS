@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# run.sh — ROS 2 Jazzy macOS Docker Helper
+# run.sh — ROS 2 Jazzy Docker Helper (Cross-Platform)
 # =============================================================================
 # Manages the full lifecycle of your ROS 2 Docker development environment.
 #
@@ -14,8 +14,8 @@
 #   stop    — Stop and remove the container (data in ./src is preserved)
 #   status  — Show the current state of the container
 #   logs    — Tail the container logs
-#   gui     — Quick-check that XQuartz is running and display is accessible
-#   help    — Show this help message  (default)
+#   gui     — Show GUI connection info and quick diagnostic tips
+#   help    — Show this help message (default)
 # =============================================================================
 
 set -euo pipefail
@@ -51,52 +51,19 @@ COMPOSE_FILE="${SCRIPT_DIR}/docker-compose.yml"
 CONTAINER_NAME="ros_jazzy_dev"
 SERVICE_NAME="ros_dev"
 SRC_DIR="${SCRIPT_DIR}/src"
+IMAGE_NAME="ros2-jazzy-dev:latest"
 
 # ---------------------------------------------------------------------------
 # Preflight checks
 # ---------------------------------------------------------------------------
 check_docker() {
     if ! command -v docker &>/dev/null; then
-        die "Docker is not installed or not in PATH.\n  Install it from https://docs.docker.com/desktop/install/mac-install/"
+        die "Docker is not installed or not in PATH.\n  Install: https://docs.docker.com/desktop/"
     fi
     if ! docker info &>/dev/null; then
-        die "Docker daemon is not running.\n  Please start Docker Desktop and try again."
+        die "Docker daemon is not running.\n  Start Docker Desktop and try again."
     fi
     success "Docker is running."
-}
-
-check_xquartz() {
-    info "Checking XQuartz..."
-
-    if ! command -v xquartz &>/dev/null && [ ! -d "/Applications/Utilities/XQuartz.app" ]; then
-        warn "XQuartz does not appear to be installed."
-        warn "  Install it from: https://www.xquartz.org/"
-        warn "  GUI apps (RViz2, rqt, Gazebo) will not work without it."
-        return
-    fi
-
-    # Open XQuartz if it isn't already running
-    if ! pgrep -x Xquartz &>/dev/null && ! pgrep -x quartz-wm &>/dev/null; then
-        info "Starting XQuartz..."
-        open -a XQuartz
-        # Give it a moment to create the X11 socket
-        sleep 2
-    fi
-
-    if command -v xhost &>/dev/null; then
-        xhost +localhost               &>/dev/null || true
-        xhost +127.0.0.1              &>/dev/null || true
-        xhost +host.docker.internal   &>/dev/null || true
-        success "XQuartz: display access granted to localhost."
-    else
-        warn "xhost not found — XQuartz may not be fully started."
-        warn "  Log out and back in, or reboot, after installing XQuartz."
-    fi
-
-    if [ -z "${DISPLAY:-}" ]; then
-        export DISPLAY=:0
-        info "DISPLAY was unset; defaulted to ':0'."
-    fi
 }
 
 ensure_src_dir() {
@@ -112,7 +79,7 @@ ensure_src_dir() {
 # ---------------------------------------------------------------------------
 cmd_help() {
     echo ""
-    echo -e "${BOLD}ROS 2 Jazzy macOS Docker Helper${RESET}"
+    echo -e "${BOLD}ROS 2 Jazzy Cross-Platform Docker Helper${RESET}"
     echo ""
     echo -e "  ${CYAN}./run.sh start${RESET}   — Build (if needed) & start container, then open shell"
     echo -e "  ${CYAN}./run.sh shell${RESET}   — Attach an interactive shell to the running container"
@@ -120,34 +87,46 @@ cmd_help() {
     echo -e "  ${CYAN}./run.sh stop${RESET}    — Stop & remove the container (./src data preserved)"
     echo -e "  ${CYAN}./run.sh status${RESET}  — Show current container state"
     echo -e "  ${CYAN}./run.sh logs${RESET}    — Tail container logs (Ctrl-C to exit)"
-    echo -e "  ${CYAN}./run.sh gui${RESET}     — Verify XQuartz / display forwarding"
+    echo -e "  ${CYAN}./run.sh gui${RESET}     — Show GUI access info and diagnostic tips"
     echo -e "  ${CYAN}./run.sh help${RESET}    — Show this message"
+    echo ""
+    echo -e "  ${BOLD}GUI Desktop:${RESET}"
+    echo -e "    Browser  →  ${CYAN}http://localhost:6080/vnc.html${RESET}"
+    echo -e "    VNC      →  ${CYAN}vnc://localhost:5900${RESET}  (no password)"
     echo ""
 }
 
 cmd_build() {
     check_docker
-    info "Building Docker image (this may take a few minutes on first run)..."
+    info "Building Docker image '${IMAGE_NAME}' (this takes a few minutes on first run)..."
     docker compose -f "${COMPOSE_FILE}" build --no-cache
     success "Image built successfully."
 }
 
 cmd_start() {
     check_docker
-    check_xquartz
     ensure_src_dir
 
-    if ! docker image inspect ros2-jazzy-macos:latest &>/dev/null; then
-        info "Image not found — building for the first time..."
+    if ! docker image inspect "${IMAGE_NAME}" &>/dev/null; then
+        info "Image not found — building for the first time (this may take 5–10 min)..."
         docker compose -f "${COMPOSE_FILE}" build
     fi
 
     info "Starting container '${CONTAINER_NAME}'..."
     docker compose -f "${COMPOSE_FILE}" up -d
 
+    # Give the entrypoint a moment to start Xvfb + VNC + noVNC
+    sleep 2
+
     success "Container is up."
     echo ""
-    info "Opening interactive shell (type 'exit' to leave without stopping the container)..."
+    echo -e "  ${BOLD}GUI Desktop (open in your browser):${RESET}"
+    echo -e "    ${CYAN}http://localhost:6080/vnc.html${RESET}"
+    echo ""
+    echo -e "  ${BOLD}VNC client (optional):${RESET}"
+    echo -e "    ${CYAN}vnc://localhost:5900${RESET}  (no password)"
+    echo ""
+    info "Opening interactive shell — type 'exit' to leave (container keeps running)."
     echo ""
 
     cmd_shell
@@ -157,7 +136,7 @@ cmd_shell() {
     if ! docker ps --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
         die "Container '${CONTAINER_NAME}' is not running.\n  Run './run.sh start' first."
     fi
-    # Use 'bash -i' so .bashrc is sourced and all aliases are available
+    # -i flag sources ~/.bashrc so all aliases (rv, rq, gz, cb…) are available
     docker compose -f "${COMPOSE_FILE}" exec "${SERVICE_NAME}" bash -i
 }
 
@@ -183,22 +162,32 @@ cmd_logs() {
 }
 
 cmd_gui() {
-    check_xquartz
     echo ""
-    info "Run these inside the container to test GUI forwarding:"
+    info "GUI is served via VNC from inside the container — no XQuartz or X server needed."
     echo ""
-    echo -e "  ${CYAN}xeyes${RESET}          — Basic X11 test (no OpenGL needed)"
-    echo -e "  ${CYAN}vglrun glxgears${RESET} — OpenGL test via VirtualGL + llvmpipe"
-    echo -e "  ${CYAN}rv${RESET}             — RViz2 (alias for: vglrun rviz2)"
-    echo -e "  ${CYAN}rq${RESET}             — rqt   (alias for: vglrun rqt)"
+    echo -e "  ${CYAN}Browser (recommended)${RESET}"
+    echo -e "    http://localhost:6080/vnc.html"
     echo ""
-    warn "If xeyes works but vglrun glxgears fails:"
-    warn "  Check Xvfb is running inside the container: ps aux | grep Xvfb"
+    echo -e "  ${CYAN}VNC client${RESET}"
+    echo -e "    vnc://localhost:5900  (no password)"
+    echo -e "    macOS: Finder → Go → Connect to Server → vnc://localhost:5900"
     echo ""
-    warn "If nothing works — XQuartz setup checklist:"
-    warn "  1. XQuartz → Preferences → Security → enable 'Allow connections from network clients'"
-    warn "  2. Fully quit XQuartz (menu bar icon → Quit) and reopen it"
-    warn "  3. Run: xhost +localhost  (on the host, outside the container)"
+    info "Test GUI from the container shell:"
+    echo -e "  ${CYAN}xeyes${RESET}          — Basic X11 test (no OpenGL required)"
+    echo -e "  ${CYAN}glxgears${RESET}       — OpenGL test via Mesa llvmpipe"
+    echo -e "  ${CYAN}glxinfo | head -20${RESET}  — Check OpenGL renderer and version"
+    echo -e "  ${CYAN}rv${RESET}             — RViz2"
+    echo -e "  ${CYAN}rq${RESET}             — rqt"
+    echo -e "  ${CYAN}gz${RESET}             — Gazebo Sim"
+    echo ""
+    warn "Troubleshooting:"
+    warn "  Blank browser screen → wait 5–10 s after 'start', then reload."
+    warn "  Check services inside container:"
+    warn "    ps aux | grep Xvfb        — should show Xvfb :99"
+    warn "    ps aux | grep x11vnc      — should show x11vnc"
+    warn "    ps aux | grep websockify  — should show websockify/noVNC"
+    warn "    cat /tmp/x11vnc.log       — x11vnc errors"
+    warn "    cat /tmp/novnc.log        — noVNC/websockify errors"
     echo ""
 }
 
@@ -208,14 +197,14 @@ cmd_gui() {
 COMMAND="${1:-help}"
 
 case "${COMMAND}" in
-    start)   cmd_start  ;;
-    shell)   cmd_shell  ;;
-    build)   cmd_build  ;;
-    stop)    cmd_stop   ;;
-    status)  cmd_status ;;
-    logs)    cmd_logs   ;;
-    gui)     cmd_gui    ;;
-    help|--help|-h) cmd_help ;;
+    start)          cmd_start  ;;
+    shell)          cmd_shell  ;;
+    build)          cmd_build  ;;
+    stop)           cmd_stop   ;;
+    status)         cmd_status ;;
+    logs)           cmd_logs   ;;
+    gui)            cmd_gui    ;;
+    help|--help|-h) cmd_help   ;;
     *)
         error "Unknown command: '${COMMAND}'"
         cmd_help

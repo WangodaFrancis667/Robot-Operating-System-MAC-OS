@@ -1,44 +1,78 @@
 #!/bin/bash
 # =============================================================================
-# Container Entrypoint — ROS 2 Jazzy / macOS Docker Dev Environment
+# Container Entrypoint — ROS 2 Jazzy / Cross-Platform Docker Dev Environment
+# =============================================================================
+# Runs as root to start system services (Xvfb, x11vnc, noVNC), then drops
+# to the "ros" user for the interactive shell.
+#
+# GUI stack (no VirtualGL — pure Mesa llvmpipe):
+#   Xvfb :99  →  x11vnc (port 5900)  →  websockify/noVNC (port 6080)
+#   Browser: http://localhost:6080/vnc.html
 # =============================================================================
 
 set -e
 
 # ---------------------------------------------------------------------------
-# 0. Core environment — export everything VirtualGL + Mesa need.
-#    docker-compose injects these, but we re-export here explicitly so they
-#    are guaranteed to be present for every child process (vglrun, rviz2…).
+# 0. Core environment — guaranteed present for every child process.
+#    We do NOT use VirtualGL (vglrun) here. Pure Mesa llvmpipe is used for
+#    all OpenGL rendering — this avoids the GLX transport segfault that
+#    occurs when VGL_DISPLAY == DISPLAY (both :99).
 # ---------------------------------------------------------------------------
-export GALLIUM_DRIVER=llvmpipe
+export DISPLAY=:99
 export LIBGL_ALWAYS_SOFTWARE=1
-export MESA_GL_VERSION_OVERRIDE=3.3   # Tells OGRE the SW renderer supports GL 3.3+
+export GALLIUM_DRIVER=llvmpipe
+
+# Mesa performance tuning for software rendering
+export MESA_GL_VERSION_OVERRIDE=3.3
 export MESA_GLSL_VERSION_OVERRIDE=330
-export QT_X11_NO_MITSHM=1
-# VirtualGL defaults to JPEG/VGL-Transport when DISPLAY is a network address
-# (host.docker.internal:0), which requires a vglclient on the Mac.
-# VGL_COMPRESS=proxy forces plain X11 transport — no vglclient needed.
-export VGL_COMPRESS=proxy
+export LP_NUM_THREADS=4
+export LIBGL_ALWAYS_INDIRECT=0
+export LIBGL_DRI3_DISABLE=1
+
+# OGRE/RViz2 optimizations
+export OGRE_RTT_MODE=Copy
+export QT_QPA_PLATFORM=xcb
+
+# Gazebo performance optimizations
+export GAZEBO_MODEL_DATABASE_URI=""
+export GAZEBO_RESOURCE_PATH="/usr/share/gazebo-11/"
+
+# XDG_RUNTIME_DIR — prevents Qt "not set, defaulting to /tmp/runtime-*" warnings
+export XDG_RUNTIME_DIR=/tmp/runtime-ros
+mkdir -p "$XDG_RUNTIME_DIR"
+chmod 700 "$XDG_RUNTIME_DIR"
 
 # ---------------------------------------------------------------------------
-# 1. Start a virtual X framebuffer on display :99.
-#    VirtualGL renders OpenGL here (Mesa llvmpipe → OpenGL 4.5).
-#    Each finished frame is composited to XQuartz as plain X11 pixels —
-#    XQuartz never sees a single OpenGL / GLX call.
+# 1. Clean up any stale X lock files from a previous container run.
+#    Create /tmp/.X11-unix directory with proper permissions for Xvfb.
 # ---------------------------------------------------------------------------
-echo "[entrypoint] Starting Xvfb on display :99 ..."
+rm -f /tmp/.X99-lock /tmp/.X11-unix/X99 2>/dev/null || true
+mkdir -p /tmp/.X11-unix
+chmod 1777 /tmp/.X11-unix
 
-# Clean up any stale lock from a previous container run
-rm -f /tmp/.X99-lock /tmp/.X11-unix/X99
+# ---------------------------------------------------------------------------
+# 2. Start Xvfb — virtual framebuffer on display :99.
+#    Mesa llvmpipe renders OpenGL directly here (no VirtualGL required).
+#    +extension GLX is needed by Qt/OGRE even in software-only mode.
+# ---------------------------------------------------------------------------
+echo "[entrypoint] Starting Xvfb on display :99 (optimized for performance)..."
 
-Xvfb :99 -screen 0 1920x1080x24 +extension GLX +extension RANDR -ac &
+# Reduced resolution (1280x720) and color depth (16-bit) for better performance
+Xvfb :99 -screen 0 1280x720x16 \
+    +extension GLX \
+    +extension RANDR \
+    +extension RENDER \
+    -ac \
+    -nolisten tcp \
+    -dpi 96 \
+    -fbdir /tmp \
+    >/tmp/xvfb.log 2>&1 &
 XVFB_PID=$!
-export VGL_DISPLAY=:99
 
-# Wait up to 5 seconds for Xvfb to become ready
+# Wait up to 5 s for Xvfb socket to appear
 XVFB_READY=0
 for i in $(seq 1 50); do
-    if xdpyinfo -display :99 &>/dev/null; then
+    if [ -S /tmp/.X11-unix/X99 ] && kill -0 $XVFB_PID 2>/dev/null; then
         XVFB_READY=1
         break
     fi
@@ -47,55 +81,138 @@ done
 
 if [ "$XVFB_READY" -eq 0 ]; then
     echo "[entrypoint] ERROR: Xvfb failed to start on display :99."
-    echo "             GUI apps (rviz2, rqt, gazebo) will not work."
-    echo "             Check that xvfb is installed: apt list --installed | grep xvfb"
+    echo "             Check /tmp/xvfb.log for details."
+    if [ -f /tmp/xvfb.log ]; then
+        echo "             Last lines from Xvfb:"
+        tail -10 /tmp/xvfb.log | sed 's/^/             /'
+    fi
+    # Don't exit — drop to shell so user can diagnose
 else
-    echo "[entrypoint] Xvfb is ready on display :99 (PID $XVFB_PID)."
+    echo "[entrypoint] Xvfb ready on :99 (PID $XVFB_PID)."
+
+    # -------------------------------------------------------------------------
+    # 3. Start x11vnc — VNC server on port 5900 (no password).
+    #    Performance optimizations:
+    #    -threads       : multi-threaded encoding
+    #    -ncache 10     : client-side caching for better performance
+    #    -ncache_cr     : cache reset for reliability
+    #    -defer 5       : defer screen updates slightly for batching
+    #    -wait 5        : wait between pointer events (reduces load)
+    # -------------------------------------------------------------------------
+    x11vnc \
+        -display :99 \
+        -forever \
+        -shared \
+        -repeat \
+        -noxdamage \
+        -nopw \
+        -rfbport 5900 \
+        -listen 0.0.0.0 \
+        -threads \
+        -ncache 10 \
+        -ncache_cr \
+        -defer 5 \
+        -wait 5 \
+        -quiet \
+        -o /tmp/x11vnc.log \
+        &
+    X11VNC_PID=$!
+
+    # Wait up to 5 s for x11vnc to open port 5900
+    VNC_READY=0
+    for i in $(seq 1 50); do
+        if ss -tlnp 2>/dev/null | grep -q ':5900'; then
+            VNC_READY=1; break
+        fi
+        sleep 0.1
+    done
+    [ "$VNC_READY" -eq 1 ] \
+        && echo "[entrypoint] x11vnc started — VNC on port 5900 (PID $X11VNC_PID)." \
+        || echo "[entrypoint] WARNING: x11vnc port 5900 not confirmed open yet."
+
+    # -------------------------------------------------------------------------
+    # 4. Start noVNC / websockify — browser UI on port 6080.
+    #
+    #    noVNC web root is installed at /opt/novnc (via Dockerfile).
+    #    websockify proxies WebSocket → TCP-VNC (localhost:5900).
+    #
+    #    We set --heartbeat=30 to keep the WebSocket alive through NAT/proxies.
+    # -------------------------------------------------------------------------
+    NOVNC_WEB=/opt/novnc
+
+    if [ -f "${NOVNC_WEB}/vnc.html" ]; then
+        websockify \
+            --web="${NOVNC_WEB}" \
+            --heartbeat=30 \
+            6080 \
+            localhost:5900 \
+            >/tmp/novnc.log 2>&1 &
+        NOVNC_PID=$!
+        echo "[entrypoint] noVNC started — http://localhost:6080/vnc.html (PID $NOVNC_PID)"
+    else
+        echo "[entrypoint] WARNING: noVNC web root not found at ${NOVNC_WEB}."
+        echo "             Falling back to raw websockify proxy on port 6080."
+        echo "             Use a VNC client at vnc://localhost:5900 instead."
+        websockify 6080 localhost:5900 >/tmp/novnc.log 2>&1 &
+    fi
 fi
 
 # ---------------------------------------------------------------------------
-# 2. Source the base ROS 2 installation
+# 5. Source ROS 2
 # ---------------------------------------------------------------------------
 source /opt/ros/jazzy/setup.bash
 
-# ---------------------------------------------------------------------------
-# 3. Source the local workspace overlay (if it has been built)
-# ---------------------------------------------------------------------------
 if [ -f "/ros2_ws/install/setup.bash" ]; then
     source /ros2_ws/install/setup.bash
 fi
 
 # ---------------------------------------------------------------------------
-# 4. Print welcome banner
+# 6. Welcome banner
 # ---------------------------------------------------------------------------
 echo ""
 echo "╔══════════════════════════════════════════════════════════╗"
-echo "║        ROS 2 Jazzy — macOS Docker Dev Environment       ║"
+echo "║     ROS 2 Jazzy — Cross-Platform Docker Dev Environment  ║"
 echo "╠══════════════════════════════════════════════════════════╣"
-printf "║  ROS Distro : %-42s ║\n" "$(printenv ROS_DISTRO)"
+printf "║  ROS Distro : %-42s ║\n" "${ROS_DISTRO:-jazzy}"
 printf "║  Workspace  : %-42s ║\n" "/ros2_ws"
-printf "║  ROS Domain : %-42s ║\n" "$(printenv ROS_DOMAIN_ID)"
+printf "║  ROS Domain : %-42s ║\n" "${ROS_DOMAIN_ID:-0}"
 echo "╠══════════════════════════════════════════════════════════╣"
-echo "║  GUI apps — always launch via vglrun (or use aliases):  ║"
-echo "║    rv        — vglrun rviz2                             ║"
-echo "║    rq        — vglrun rqt                               ║"
-echo "║    gz        — vglrun gazebo                            ║"
+echo "║  GUI Desktop (open in browser or VNC client):           ║"
+echo "║    Browser : http://localhost:6080/vnc.html             ║"
+echo "║    VNC     : vnc://localhost:5900  (no password)        ║"
+echo "╠══════════════════════════════════════════════════════════╣"
+echo "║  GUI commands (run from this shell):                    ║"
+echo "║    rv  — rviz2       rq  — rqt       gz  — gz sim       ║"
 echo "╠══════════════════════════════════════════════════════════╣"
 echo "║  ROS 2 aliases:                                         ║"
-echo "║    cb  — colcon build --symlink-install                 ║"
-echo "║    cs  — source install/setup.bash                      ║"
-echo "║    rl  — ros2 launch                                    ║"
-echo "║    rr  — ros2 run     rt — ros2 topic                   ║"
+echo "║    cb  — colcon build   cs  — source install/setup.bash ║"
+echo "║    rl  — ros2 launch    rr  — ros2 run                  ║"
+echo "║    rt  — ros2 topic     rn  — ros2 node                 ║"
 echo "╚══════════════════════════════════════════════════════════╝"
+echo ""
+echo "  Renderer: Mesa llvmpipe (software OpenGL — no GPU required)"
+echo "  OpenGL  : $(DISPLAY=:99 LIBGL_ALWAYS_SOFTWARE=1 glxinfo 2>/dev/null | grep 'OpenGL version' || echo 'run glxinfo to check')"
 echo ""
 
 # ---------------------------------------------------------------------------
-# 5. Execute the command passed to the container.
-#    We invoke bash as an interactive shell (-i) so that ~/.bashrc is sourced
-#    and all aliases (rv, rq, gz, cb, cs …) are available immediately.
+# 7. Drop to interactive shell as the "ros" user.
+#    su --login -s /bin/bash -w DISPLAY,LIBGL_ALWAYS_SOFTWARE,...
+#    sources ~/.bashrc (which re-exports all env vars) so the user's shell
+#    always has the correct environment even if they open extra terminals.
 # ---------------------------------------------------------------------------
 if [ "$#" -eq 0 ] || [ "$1" = "bash" ]; then
-    exec bash --login -i
+    # Pass key env vars into the user shell explicitly
+    exec su - ros --shell /bin/bash -w \
+        DISPLAY,LIBGL_ALWAYS_SOFTWARE,GALLIUM_DRIVER,\
+        MESA_GL_VERSION_OVERRIDE,MESA_GLSL_VERSION_OVERRIDE,\
+        OGRE_RTT_MODE,QT_QPA_PLATFORM,XDG_RUNTIME_DIR,\
+        ROS_DOMAIN_ID,RCUTILS_COLORIZED_OUTPUT \
+        -c 'exec bash --login -i'
 else
-    exec "$@"
+    exec su - ros --shell /bin/bash -w \
+        DISPLAY,LIBGL_ALWAYS_SOFTWARE,GALLIUM_DRIVER,\
+        MESA_GL_VERSION_OVERRIDE,MESA_GLSL_VERSION_OVERRIDE,\
+        OGRE_RTT_MODE,QT_QPA_PLATFORM,XDG_RUNTIME_DIR,\
+        ROS_DOMAIN_ID,RCUTILS_COLORIZED_OUTPUT \
+        -c "exec $*"
 fi
