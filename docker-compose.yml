@@ -7,9 +7,12 @@
 #   ./run.sh stop     — stop and remove the container
 #   ./run.sh build    — force-rebuild the image
 #
-# GUI (RViz2, rqt, Gazebo) is forwarded to XQuartz on the host.
-# Ensure XQuartz is running and "Allow connections from network clients"
-# is enabled in XQuartz → Preferences → Security.
+# GUI Strategy: VNC + noVNC (no XQuartz required)
+#   All GUI apps render on an Xvfb virtual framebuffer (:99) inside the
+#   container, which is served over VNC (port 5900) and noVNC (port 6080).
+#
+#   View the desktop in your browser:  http://localhost:6080/vnc.html
+#   Or via any VNC client:             vnc://localhost:5900  (no password)
 #
 # Inside the container use:  rv (rviz2)  rq (rqt)  gz (gazebo)
 # =============================================================================
@@ -24,32 +27,34 @@ services:
 
     environment:
       # ------------------------------------------------------------------
-      # X11 display forwarding — XQuartz listens on display :0 of the host
+      # Display — Xvfb virtual framebuffer inside the container.
+      # GUI output is served to the host via VNC (port 5900) and
+      # noVNC browser UI (port 6080).  No XQuartz needed.
       # ------------------------------------------------------------------
-      - DISPLAY=host.docker.internal:0
-      - QT_X11_NO_MITSHM=1
+      - DISPLAY=:99
 
       # ------------------------------------------------------------------
       # VirtualGL + Mesa llvmpipe software rendering
       # ------------------------------------------------------------------
-      # VGL_DISPLAY points VirtualGL at the Xvfb display started by
-      # entrypoint.sh.  OpenGL is rendered there (offscreen, software),
-      # then composited to XQuartz via plain X11 — no GLX to XQuartz.
+      # VGL_DISPLAY=:99 — OpenGL rendered by VirtualGL on Xvfb:99.
+      # DISPLAY=:99 means both render target and output are the same
+      # local display, so no network transport or vglclient is required.
       - VGL_DISPLAY=:99
-      # VirtualGL defaults to JPEG/VGL-Transport when DISPLAY looks like a
-      # network address (host.docker.internal:0), which requires a vglclient
-      # daemon on the Mac.  VGL_COMPRESS=proxy forces the plain X11 transport
-      # (equivalent to vglrun -c proxy) — no vglclient needed.
-      - VGL_COMPRESS=proxy
 
       # Force Mesa's llvmpipe software renderer (OpenGL 4.5 capable)
       - GALLIUM_DRIVER=llvmpipe
       - LIBGL_ALWAYS_SOFTWARE=1
 
       # Tell OGRE/RViz2 the software renderer satisfies the GL 3.3 requirement.
-      # Without this, OGRE rejects the context even though llvmpipe supports 4.5.
       - MESA_GL_VERSION_OVERRIDE=3.3
       - MESA_GLSL_VERSION_OVERRIDE=330
+
+      # OGRE_RTT_MODE=Copy — off-screen texture blit; avoids GLX pbuffer issues.
+      - OGRE_RTT_MODE=Copy
+      # QT_QPA_PLATFORM=xcb — tells Qt to use the X11/xcb backend.
+      # Without this Qt aborts with "could not load platform plugin xcb" when
+      # DISPLAY=:99 because it cannot auto-detect the platform in some builds.
+      - QT_QPA_PLATFORM=xcb
 
       # ------------------------------------------------------------------
       # ROS 2
@@ -57,11 +62,13 @@ services:
       - ROS_DOMAIN_ID=0
       - RCUTILS_COLORIZED_OUTPUT=1
 
+    ports:
+      - "5900:5900"   # VNC  — connect with any VNC client (no password)
+      - "6080:6080"   # noVNC — open http://localhost:6080/vnc.html in a browser
+
     volumes:
       # Your ROS 2 package source — persisted on the host Mac
       - ./src:/ros2_ws/src
-      # X11 Unix socket for GUI forwarding via XQuartz
-      - /tmp/.X11-unix:/tmp/.X11-unix:rw
       # Named volumes keep colcon build artefacts between container restarts
       - ros2_build_cache:/ros2_ws/build
       - ros2_install_cache:/ros2_ws/install
@@ -72,6 +79,14 @@ services:
     privileged: true
     shm_size: "512mb"
     restart: "no"
+
+    # ------------------------------------------------------------------
+    # DNS — explicit resolvers so container can reach fuel.gazebosim.org
+    # and other external hosts (default Docker DNS sometimes fails on macOS)
+    # ------------------------------------------------------------------
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
 
 volumes:
   ros2_build_cache:
