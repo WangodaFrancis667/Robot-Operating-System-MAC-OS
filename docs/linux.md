@@ -180,8 +180,8 @@ sudo pacman -S git
 
 ```bash
 cd ~
-git clone https://github.com/your-username/ros2-jazzy-docker.git
-cd ros2-jazzy-docker
+git clone https://github.com/WangodaFrancis667/Robot-Operating-System-via-Docker.git
+cd Robot-Operating-System-via-Docker
 chmod +x run.sh
 ```
 

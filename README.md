@@ -254,8 +254,8 @@ Open **Ubuntu** (or your WSL distro) from the Start Menu. All commands in this R
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/your-username/ros2-jazzy-docker.git
-cd ros2-jazzy-docker
+git clone https://github.com/WangodaFrancis667/Robot-Operating-System-via-Docker.git
+cd Robot-Operating-System-via-Docker
 
 # 2. Make the helper script executable
 chmod +x run.sh

@@ -183,8 +183,8 @@ If `docker` is not found, ensure Docker Desktop is running and WSL integration i
 cd ~
 
 # Clone the project
-git clone https://github.com/your-username/ros2-jazzy-docker.git
-cd ros2-jazzy-docker
+git clone https://github.com/WangodaFrancis667/Robot-Operating-System-via-Docker.git
+cd Robot-Operating-System-via-Docker
 
 # Make the helper script executable
 chmod +x run.sh
@@ -505,7 +505,7 @@ Windows 10 / 11
         ├── Xvfb :99            ← virtual display (Mesa software render)
         ├── x11vnc :5900        ← VNC server
         ├── noVNC/websockify :6080  ← browser VNC UI
-        ├── /ros2_ws/src   ←── bind-mount → ~/ros2-jazzy-docker/src
+        ├── /ros2_ws/src   ←── bind-mount → ~/Robot-Operating-System-via-Docker/src
         └── /ros2_ws/build, install, log  (named volumes)
 
 Browser on Windows:
