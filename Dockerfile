@@ -34,6 +34,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     x11-xserver-utils \
     xauth \
     xvfb \
+    # Qt5 xcb platform plugin runtime dependencies.
+    # libxcb-xinerama0 and libxcb-cursor0 are required by Qt5's xcb backend
+    # on Ubuntu Noble; without them Qt aborts with "could not load platform
+    # plugin xcb" even when QT_QPA_PLATFORM=xcb is set.
+    libxcb-xinerama0 \
+    libxcb-cursor0 \
+    libxcb-icccm4 \
+    libxcb-image0 \
+    libxcb-keysyms1 \
+    libxcb-randr0 \
+    libxcb-render-util0 \
+    libxkbcommon-x11-0 \
+    # VNC — x11vnc serves Xvfb:99; noVNC/websockify provides a browser UI
+    x11vnc \
+    novnc \
+    python3-websockify \
     # Mesa software renderer (llvmpipe → OpenGL 4.5)
     mesa-utils \
     libgl1 \
@@ -48,6 +64,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-vcstool \
     python3-argcomplete \
     ros-jazzy-ament-cmake \
+    # Gazebo Harmonic + ROS 2 bridge (compatible with ROS 2 Jazzy)
+    # ros-jazzy-ros-gz pulls in gz-harmonic; the simulator binary becomes /usr/bin/gz
+    ros-jazzy-ros-gz \
     # Developer utilities
     nano \
     vim \
@@ -117,9 +136,13 @@ WORKDIR /ros2_ws
 # These live in /usr/local/bin/ so they work in ALL shell types
 # (interactive, non-interactive, login, exec'd) — not just bash with .bashrc.
 # ---------------------------------------------------------------------------
-RUN printf '#!/bin/bash\nexec vglrun rviz2 "$@"\n'  > /usr/local/bin/rv  \
-    && printf '#!/bin/bash\nexec vglrun rqt "$@"\n'    > /usr/local/bin/rq  \
-    && printf '#!/bin/bash\nexec vglrun gazebo "$@"\n' > /usr/local/bin/gz  \
+# QT_QPA_PLATFORM=xcb — Qt must be told to use the X11/xcb backend explicitly
+# when DISPLAY is a non-standard value (:99). Without this Qt aborts with
+# "could not load platform plugin xcb" even though the plugin is installed.
+# OGRE_RTT_MODE=Copy  — off-screen blit avoids GLX pbuffer issues.
+RUN printf '#!/bin/bash\nexport QT_QPA_PLATFORM=xcb\nexport OGRE_RTT_MODE=Copy\nexec vglrun rviz2 "$@"\n' > /usr/local/bin/rv \
+    && printf '#!/bin/bash\nexport QT_QPA_PLATFORM=xcb\nexec vglrun rqt "$@"\n' > /usr/local/bin/rq  \
+    && printf '#!/bin/bash\nexport QT_QPA_PLATFORM=xcb\n# Locate the Gazebo Harmonic binary at runtime.\n# With some apt layouts the real binary is gz-harmonic (not /usr/bin/gz).\n# vglrun requires a real file path, so we resolve it here.\nGZ_BIN=$(command -v gz-harmonic 2>/dev/null)\nif [ -z "$GZ_BIN" ]; then\n    GZ_BIN=$(find /usr /opt -maxdepth 6 -name "gz" ! -path "/usr/local/bin/gz" -type f 2>/dev/null | head -1)\nfi\nif [ -z "$GZ_BIN" ]; then\n    echo "Error: gz binary not found (tried gz-harmonic and filesystem search)" >&2\n    exit 1\nfi\nexec vglrun "$GZ_BIN" sim "$@"\n' > /usr/local/bin/gz  \
     && chmod +x /usr/local/bin/rv /usr/local/bin/rq /usr/local/bin/gz
 
 # ---------------------------------------------------------------------------
@@ -133,18 +156,17 @@ RUN echo "" >> /home/${USERNAME}/.bashrc \
     && echo "export RCUTILS_COLORIZED_OUTPUT=1" >> /home/${USERNAME}/.bashrc \
     \
     && echo "# ── X11 / OpenGL ─────────────────────────────────────────" >> /home/${USERNAME}/.bashrc \
-    && echo "export QT_X11_NO_MITSHM=1" >> /home/${USERNAME}/.bashrc \
-    && echo "# Xvfb virtual display started by entrypoint.sh" >> /home/${USERNAME}/.bashrc \
+    && echo "# DISPLAY=:99 points at the Xvfb virtual framebuffer inside the container." >> /home/${USERNAME}/.bashrc \
+    && echo "# The screen is served over VNC (port 5900) and noVNC (port 6080)." >> /home/${USERNAME}/.bashrc \
+    && echo "export DISPLAY=:99" >> /home/${USERNAME}/.bashrc \
     && echo "export VGL_DISPLAY=:99" >> /home/${USERNAME}/.bashrc \
-    && echo "# VGL_COMPRESS=proxy forces X11 transport — host.docker.internal:0 looks" >> /home/${USERNAME}/.bashrc \
-    && echo "# remote to VirtualGL, which would otherwise require a vglclient on the Mac" >> /home/${USERNAME}/.bashrc \
-    && echo "export VGL_COMPRESS=proxy" >> /home/${USERNAME}/.bashrc \
     && echo "# Mesa software renderer — required for OpenGL inside Docker on macOS" >> /home/${USERNAME}/.bashrc \
     && echo "export GALLIUM_DRIVER=llvmpipe" >> /home/${USERNAME}/.bashrc \
     && echo "export LIBGL_ALWAYS_SOFTWARE=1" >> /home/${USERNAME}/.bashrc \
     && echo "# Override reported GL version so OGRE accepts the SW renderer" >> /home/${USERNAME}/.bashrc \
     && echo "export MESA_GL_VERSION_OVERRIDE=3.3" >> /home/${USERNAME}/.bashrc \
     && echo "export MESA_GLSL_VERSION_OVERRIDE=330" >> /home/${USERNAME}/.bashrc \
+    && echo "export OGRE_RTT_MODE=Copy" >> /home/${USERNAME}/.bashrc \
     \
     && echo "# ── Colcon / ROS aliases ─────────────────────────────────" >> /home/${USERNAME}/.bashrc \
     && echo "alias cb='colcon build --symlink-install'" >> /home/${USERNAME}/.bashrc \
@@ -155,9 +177,10 @@ RUN echo "" >> /home/${USERNAME}/.bashrc \
     && echo "alias rt='ros2 topic'" >> /home/${USERNAME}/.bashrc \
     && echo "alias rn='ros2 node'" >> /home/${USERNAME}/.bashrc \
     && echo "# GUI shortcuts (also available as system commands rv / rq / gz)" >> /home/${USERNAME}/.bashrc \
-    && echo "alias rv='vglrun rviz2'" >> /home/${USERNAME}/.bashrc \
-    && echo "alias rq='vglrun rqt'" >> /home/${USERNAME}/.bashrc \
-    && echo "alias gz='vglrun gazebo'" >> /home/${USERNAME}/.bashrc
+    && echo "alias rv='QT_QPA_PLATFORM=xcb OGRE_RTT_MODE=Copy vglrun rviz2'" >> /home/${USERNAME}/.bashrc \
+    && echo "alias rq='QT_QPA_PLATFORM=xcb vglrun rqt'" >> /home/${USERNAME}/.bashrc \
+    && echo "# gz resolves the Gazebo binary at runtime to avoid hardcoding /usr/bin/gz" >> /home/${USERNAME}/.bashrc \
+    && echo "alias gz='QT_QPA_PLATFORM=xcb /usr/local/bin/gz'" >> /home/${USERNAME}/.bashrc
 
 # Also source ROS for root sessions used during build-time checks
 RUN echo "source /opt/ros/jazzy/setup.bash" >> /root/.bashrc
