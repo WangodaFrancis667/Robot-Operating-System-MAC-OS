@@ -154,6 +154,9 @@ This project uses in-container VNC — no XQuartz, no X11 forwarding, no host di
 
 ### 🐧 Linux
 
+> [!TIP]
+> See the [**Full Linux Setup Guide →**](docs/linux.md) for a complete step-by-step walkthrough including distro-specific install commands, headless server usage, and troubleshooting.
+
 <details open>
 <summary><strong>Installation instructions</strong></summary>
 
@@ -190,6 +193,9 @@ The container runs its own Xvfb display. Your host display is not used at all �
 ---
 
 ### 🪟 Windows
+
+> [!TIP]
+> See the [**Full Windows Setup Guide →**](docs/windows.md) for a complete step-by-step walkthrough including WSL 2 setup, Docker Desktop configuration, resource tuning, and troubleshooting.
 
 <details open>
 <summary><strong>Installation instructions</strong></summary>
