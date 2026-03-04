@@ -66,37 +66,11 @@ check_docker() {
 }
 
 check_xquartz() {
-    info "Checking XQuartz..."
-
-    if ! command -v xquartz &>/dev/null && [ ! -d "/Applications/Utilities/XQuartz.app" ]; then
-        warn "XQuartz does not appear to be installed."
-        warn "  Install it from: https://www.xquartz.org/"
-        warn "  GUI apps (RViz2, rqt, Gazebo) will not work without it."
-        return
-    fi
-
-    # Open XQuartz if it isn't already running
-    if ! pgrep -x Xquartz &>/dev/null && ! pgrep -x quartz-wm &>/dev/null; then
-        info "Starting XQuartz..."
-        open -a XQuartz
-        # Give it a moment to create the X11 socket
-        sleep 2
-    fi
-
-    if command -v xhost &>/dev/null; then
-        xhost +localhost               &>/dev/null || true
-        xhost +127.0.0.1              &>/dev/null || true
-        xhost +host.docker.internal   &>/dev/null || true
-        success "XQuartz: display access granted to localhost."
-    else
-        warn "xhost not found — XQuartz may not be fully started."
-        warn "  Log out and back in, or reboot, after installing XQuartz."
-    fi
-
-    if [ -z "${DISPLAY:-}" ]; then
-        export DISPLAY=:0
-        info "DISPLAY was unset; defaulted to ':0'."
-    fi
+    # XQuartz is no longer required — GUI is served via VNC/noVNC from inside
+    # the container (http://localhost:6080/vnc.html or vnc://localhost:5900).
+    # This function is kept as an optional helper for users who still want
+    # direct X11 forwarding alongside VNC.
+    :
 }
 
 ensure_src_dir() {
@@ -147,6 +121,10 @@ cmd_start() {
 
     success "Container is up."
     echo ""
+    echo -e "  ${BOLD}GUI Desktop (VNC):${RESET}"
+    echo -e "    Browser  →  ${CYAN}http://localhost:6080/vnc.html${RESET}"
+    echo -e "    VNC client →  ${CYAN}vnc://localhost:5900${RESET}  (no password)"
+    echo ""
     info "Opening interactive shell (type 'exit' to leave without stopping the container)..."
     echo ""
 
@@ -183,22 +161,24 @@ cmd_logs() {
 }
 
 cmd_gui() {
-    check_xquartz
     echo ""
-    info "Run these inside the container to test GUI forwarding:"
+    info "GUI is served via VNC from inside the container (no XQuartz needed):"
     echo ""
-    echo -e "  ${CYAN}xeyes${RESET}          — Basic X11 test (no OpenGL needed)"
-    echo -e "  ${CYAN}vglrun glxgears${RESET} — OpenGL test via VirtualGL + llvmpipe"
-    echo -e "  ${CYAN}rv${RESET}             — RViz2 (alias for: vglrun rviz2)"
-    echo -e "  ${CYAN}rq${RESET}             — rqt   (alias for: vglrun rqt)"
+    echo -e "  ${CYAN}Browser${RESET}    →  http://localhost:6080/vnc.html   (noVNC — no client needed)"
+    echo -e "  ${CYAN}VNC client${RESET} →  vnc://localhost:5900             (no password)"
+    echo -e "  ${CYAN}macOS Screen Sharing${RESET}:  Finder → Go → Connect to Server → vnc://localhost:5900"
     echo ""
-    warn "If xeyes works but vglrun glxgears fails:"
-    warn "  Check Xvfb is running inside the container: ps aux | grep Xvfb"
+    info "To test GUI rendering from inside the container shell:"
+    echo -e "  ${CYAN}xeyes${RESET}            — Basic X11 test (no OpenGL)"
+    echo -e "  ${CYAN}vglrun glxgears${RESET}  — OpenGL via VirtualGL + Mesa llvmpipe"
+    echo -e "  ${CYAN}rv${RESET}               — RViz2"
+    echo -e "  ${CYAN}rq${RESET}               — rqt"
+    echo -e "  ${CYAN}gz${RESET}               — Gazebo Sim"
     echo ""
-    warn "If nothing works — XQuartz setup checklist:"
-    warn "  1. XQuartz → Preferences → Security → enable 'Allow connections from network clients'"
-    warn "  2. Fully quit XQuartz (menu bar icon → Quit) and reopen it"
-    warn "  3. Run: xhost +localhost  (on the host, outside the container)"
+    warn "If the VNC desktop is blank:"
+    warn "  Check Xvfb is running:  ps aux | grep Xvfb"
+    warn "  Check x11vnc is running: ps aux | grep x11vnc"
+    warn "  Check noVNC is running: ps aux | grep websockify"
     echo ""
 }
 
