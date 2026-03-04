@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# run.sh — ROS 2 Jazzy macOS Docker Helper
+# run.sh — ROS 2 Jazzy Docker Helper (Cross-Platform)
 # =============================================================================
 # Manages the full lifecycle of your ROS 2 Docker development environment.
 #
@@ -14,8 +14,8 @@
 #   stop    — Stop and remove the container (data in ./src is preserved)
 #   status  — Show the current state of the container
 #   logs    — Tail the container logs
-#   gui     — Quick-check that XQuartz is running and display is accessible
-#   help    — Show this help message  (default)
+#   gui     — Show GUI connection info and quick diagnostic tips
+#   help    — Show this help message (default)
 # =============================================================================
 
 set -euo pipefail
@@ -51,26 +51,19 @@ COMPOSE_FILE="${SCRIPT_DIR}/docker-compose.yml"
 CONTAINER_NAME="ros_jazzy_dev"
 SERVICE_NAME="ros_dev"
 SRC_DIR="${SCRIPT_DIR}/src"
+IMAGE_NAME="ros2-jazzy-dev:latest"
 
 # ---------------------------------------------------------------------------
 # Preflight checks
 # ---------------------------------------------------------------------------
 check_docker() {
     if ! command -v docker &>/dev/null; then
-        die "Docker is not installed or not in PATH.\n  Install it from https://docs.docker.com/desktop/install/mac-install/"
+        die "Docker is not installed or not in PATH.\n  Install: https://docs.docker.com/desktop/"
     fi
     if ! docker info &>/dev/null; then
-        die "Docker daemon is not running.\n  Please start Docker Desktop and try again."
+        die "Docker daemon is not running.\n  Start Docker Desktop and try again."
     fi
     success "Docker is running."
-}
-
-check_xquartz() {
-    # XQuartz is no longer required — GUI is served via VNC/noVNC from inside
-    # the container (http://localhost:6080/vnc.html or vnc://localhost:5900).
-    # This function is kept as an optional helper for users who still want
-    # direct X11 forwarding alongside VNC.
-    :
 }
 
 ensure_src_dir() {
@@ -86,7 +79,7 @@ ensure_src_dir() {
 # ---------------------------------------------------------------------------
 cmd_help() {
     echo ""
-    echo -e "${BOLD}ROS 2 Jazzy macOS Docker Helper${RESET}"
+    echo -e "${BOLD}ROS 2 Jazzy Cross-Platform Docker Helper${RESET}"
     echo ""
     echo -e "  ${CYAN}./run.sh start${RESET}   — Build (if needed) & start container, then open shell"
     echo -e "  ${CYAN}./run.sh shell${RESET}   — Attach an interactive shell to the running container"
@@ -94,38 +87,46 @@ cmd_help() {
     echo -e "  ${CYAN}./run.sh stop${RESET}    — Stop & remove the container (./src data preserved)"
     echo -e "  ${CYAN}./run.sh status${RESET}  — Show current container state"
     echo -e "  ${CYAN}./run.sh logs${RESET}    — Tail container logs (Ctrl-C to exit)"
-    echo -e "  ${CYAN}./run.sh gui${RESET}     — Verify XQuartz / display forwarding"
+    echo -e "  ${CYAN}./run.sh gui${RESET}     — Show GUI access info and diagnostic tips"
     echo -e "  ${CYAN}./run.sh help${RESET}    — Show this message"
+    echo ""
+    echo -e "  ${BOLD}GUI Desktop:${RESET}"
+    echo -e "    Browser  →  ${CYAN}http://localhost:6080/vnc.html${RESET}"
+    echo -e "    VNC      →  ${CYAN}vnc://localhost:5900${RESET}  (no password)"
     echo ""
 }
 
 cmd_build() {
     check_docker
-    info "Building Docker image (this may take a few minutes on first run)..."
+    info "Building Docker image '${IMAGE_NAME}' (this takes a few minutes on first run)..."
     docker compose -f "${COMPOSE_FILE}" build --no-cache
     success "Image built successfully."
 }
 
 cmd_start() {
     check_docker
-    check_xquartz
     ensure_src_dir
 
-    if ! docker image inspect ros2-jazzy-macos:latest &>/dev/null; then
-        info "Image not found — building for the first time..."
+    if ! docker image inspect "${IMAGE_NAME}" &>/dev/null; then
+        info "Image not found — building for the first time (this may take 5–10 min)..."
         docker compose -f "${COMPOSE_FILE}" build
     fi
 
     info "Starting container '${CONTAINER_NAME}'..."
     docker compose -f "${COMPOSE_FILE}" up -d
 
+    # Give the entrypoint a moment to start Xvfb + VNC + noVNC
+    sleep 2
+
     success "Container is up."
     echo ""
-    echo -e "  ${BOLD}GUI Desktop (VNC):${RESET}"
-    echo -e "    Browser  →  ${CYAN}http://localhost:6080/vnc.html${RESET}"
-    echo -e "    VNC client →  ${CYAN}vnc://localhost:5900${RESET}  (no password)"
+    echo -e "  ${BOLD}GUI Desktop (open in your browser):${RESET}"
+    echo -e "    ${CYAN}http://localhost:6080/vnc.html${RESET}"
     echo ""
-    info "Opening interactive shell (type 'exit' to leave without stopping the container)..."
+    echo -e "  ${BOLD}VNC client (optional):${RESET}"
+    echo -e "    ${CYAN}vnc://localhost:5900${RESET}  (no password)"
+    echo ""
+    info "Opening interactive shell — type 'exit' to leave (container keeps running)."
     echo ""
 
     cmd_shell
@@ -135,7 +136,7 @@ cmd_shell() {
     if ! docker ps --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
         die "Container '${CONTAINER_NAME}' is not running.\n  Run './run.sh start' first."
     fi
-    # Use 'bash -i' so .bashrc is sourced and all aliases are available
+    # -i flag sources ~/.bashrc so all aliases (rv, rq, gz, cb…) are available
     docker compose -f "${COMPOSE_FILE}" exec "${SERVICE_NAME}" bash -i
 }
 
@@ -162,23 +163,31 @@ cmd_logs() {
 
 cmd_gui() {
     echo ""
-    info "GUI is served via VNC from inside the container (no XQuartz needed):"
+    info "GUI is served via VNC from inside the container — no XQuartz or X server needed."
     echo ""
-    echo -e "  ${CYAN}Browser${RESET}    →  http://localhost:6080/vnc.html   (noVNC — no client needed)"
-    echo -e "  ${CYAN}VNC client${RESET} →  vnc://localhost:5900             (no password)"
-    echo -e "  ${CYAN}macOS Screen Sharing${RESET}:  Finder → Go → Connect to Server → vnc://localhost:5900"
+    echo -e "  ${CYAN}Browser (recommended)${RESET}"
+    echo -e "    http://localhost:6080/vnc.html"
     echo ""
-    info "To test GUI rendering from inside the container shell:"
-    echo -e "  ${CYAN}xeyes${RESET}            — Basic X11 test (no OpenGL)"
-    echo -e "  ${CYAN}vglrun glxgears${RESET}  — OpenGL via VirtualGL + Mesa llvmpipe"
-    echo -e "  ${CYAN}rv${RESET}               — RViz2"
-    echo -e "  ${CYAN}rq${RESET}               — rqt"
-    echo -e "  ${CYAN}gz${RESET}               — Gazebo Sim"
+    echo -e "  ${CYAN}VNC client${RESET}"
+    echo -e "    vnc://localhost:5900  (no password)"
+    echo -e "    macOS: Finder → Go → Connect to Server → vnc://localhost:5900"
     echo ""
-    warn "If the VNC desktop is blank:"
-    warn "  Check Xvfb is running:  ps aux | grep Xvfb"
-    warn "  Check x11vnc is running: ps aux | grep x11vnc"
-    warn "  Check noVNC is running: ps aux | grep websockify"
+    info "Test GUI from the container shell:"
+    echo -e "  ${CYAN}xeyes${RESET}          — Basic X11 test (no OpenGL required)"
+    echo -e "  ${CYAN}glxgears${RESET}       — OpenGL test via Mesa llvmpipe"
+    echo -e "  ${CYAN}glxinfo | head -20${RESET}  — Check OpenGL renderer and version"
+    echo -e "  ${CYAN}rv${RESET}             — RViz2"
+    echo -e "  ${CYAN}rq${RESET}             — rqt"
+    echo -e "  ${CYAN}gz${RESET}             — Gazebo Sim"
+    echo ""
+    warn "Troubleshooting:"
+    warn "  Blank browser screen → wait 5–10 s after 'start', then reload."
+    warn "  Check services inside container:"
+    warn "    ps aux | grep Xvfb        — should show Xvfb :99"
+    warn "    ps aux | grep x11vnc      — should show x11vnc"
+    warn "    ps aux | grep websockify  — should show websockify/noVNC"
+    warn "    cat /tmp/x11vnc.log       — x11vnc errors"
+    warn "    cat /tmp/novnc.log        — noVNC/websockify errors"
     echo ""
 }
 
@@ -188,14 +197,14 @@ cmd_gui() {
 COMMAND="${1:-help}"
 
 case "${COMMAND}" in
-    start)   cmd_start  ;;
-    shell)   cmd_shell  ;;
-    build)   cmd_build  ;;
-    stop)    cmd_stop   ;;
-    status)  cmd_status ;;
-    logs)    cmd_logs   ;;
-    gui)     cmd_gui    ;;
-    help|--help|-h) cmd_help ;;
+    start)          cmd_start  ;;
+    shell)          cmd_shell  ;;
+    build)          cmd_build  ;;
+    stop)           cmd_stop   ;;
+    status)         cmd_status ;;
+    logs)           cmd_logs   ;;
+    gui)            cmd_gui    ;;
+    help|--help|-h) cmd_help   ;;
     *)
         error "Unknown command: '${COMMAND}'"
         cmd_help
