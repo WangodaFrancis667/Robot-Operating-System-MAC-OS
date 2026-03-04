@@ -189,7 +189,7 @@ vglrun glxgears
 # ROS 2 GUI tools — use the aliases or vglrun directly
 rv              # RViz2   →  vglrun rviz2
 rq              # rqt     →  vglrun rqt
-gz              # Gazebo  →  vglrun gazebo
+gz              # Gazebo  →  vglrun gz sim
 ```
 
 > [!WARNING]
@@ -276,7 +276,7 @@ All aliases are available immediately in any shell opened via `./run.sh start` o
 |:---|:---|:---|
 | `rv` | `vglrun rviz2` | [RViz2](https://docs.ros.org/en/jazzy/p/rviz2/) — ROS 2 3D visualizer |
 | `rq` | `vglrun rqt` | [rqt](https://docs.ros.org/en/jazzy/Concepts/About-RQt.html) — ROS 2 GUI plugin framework |
-| `gz` | `vglrun gazebo` | [Gazebo](https://gazebosim.org/) — robotics simulator |
+| `gz` | `vglrun gz sim` | [Gazebo](https://gazebosim.org/) — robotics simulator |
 
 ### 🔧 Build & Workspace
 
